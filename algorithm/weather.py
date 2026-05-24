@@ -3,7 +3,6 @@ import pandas as pd
 
 
 def get_weather_forecast(latitude, longitude):
-
     url = "https://api.open-meteo.com/v1/forecast"
 
     params = {
@@ -34,39 +33,42 @@ def get_weather_forecast(latitude, longitude):
 
     return forecast_df
 
-def calculate_pv_kw(irradiance, cfg):
 
+def calculate_pv_kw(irradiance, cfg):
     return (
         cfg.pv_capacity
         * (irradiance / 1000)
         * cfg.system_efficiency
     )
 
-def prepare_weather_data(forecast_df, cfg):
 
-    forecast_df["pv_kw"] = forecast_df[
-        "shortwave_radiation"
-    ].apply(lambda x: calculate_pv_kw(x, cfg))
+def prepare_weather_data(forecast_df, cfg):
+    forecast_df["time"] = pd.to_datetime(forecast_df["time"])
+
+    forecast_df["pv_kw"] = forecast_df["shortwave_radiation"].apply(
+        lambda x: calculate_pv_kw(x, cfg)
+    )
+
+    forecast_df["date"] = forecast_df["time"].dt.strftime("%Y-%m-%d")
+    forecast_df["slot"] = forecast_df["time"].dt.hour * 2
 
     return forecast_df
 
-def aggregate_daily_pv(forecast_df):
 
+def aggregate_daily_pv(forecast_df):
     daily_kwh = (
         forecast_df
-        .groupby(forecast_df["time"].str[:10])["pv_kw"]
+        .groupby("date")["pv_kw"]
         .sum()
     )
 
     return daily_kwh.to_dict()
 
-def classify_forecast(daily_kwh):
 
+def classify_forecast(daily_kwh):
     if daily_kwh > 20:
         return "HIGH"
-
     elif daily_kwh >= 10:
         return "MEDIUM"
-
     else:
         return "LOW"

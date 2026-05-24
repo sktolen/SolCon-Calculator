@@ -1,7 +1,9 @@
 import streamlit as st
 import requests
 import pandas as pd
-from algorithm.solcon_v51 import SystemConfig
+from algorithm.solcon_v51 import SystemConfig, simulate_solcon
+from algorithm.weather import get_weather_forecast, prepare_weather_data, aggregate_daily_pv
+import datetime
 
 
 def show_calculator():
@@ -134,3 +136,96 @@ def show_calculator():
         latitude=latitude,
         longitude =longitude
     )
+
+    if run_btn:
+        forecast_df = get_weather_forecast(
+            cfg.latitude,
+            cfg.longitude
+        )
+
+        forecast_df = prepare_weather_data(
+            forecast_df,
+            cfg
+        )
+
+        daily_kwh = aggregate_daily_pv(
+            forecast_df
+        )
+
+        results = simulate_solcon(
+            pv_data=forecast_df,
+            daily_kwh=daily_kwh,
+            start_weekday=0,
+            cfg=cfg
+        )
+
+        results_df = pd.DataFrame(results)
+
+        st.subheader("Simulation Results")
+
+        # Tables
+        total_cost = results_df["cost"].sum()
+        total_grid_load = results_df["grid_load"].sum()
+        total_grid_charge = results_df["grid_charge"].sum()
+        total_battery_load = results_df["battery_load"].sum()
+        min_soc = results_df["soc"].min() * 100
+        max_soc = results_df["soc"].max() * 100
+
+        col1, col2, col3, col4, col5 = st.columns(5)
+
+        col1.metric("Total Cost", f"PHP {total_cost:,.2f}")
+        col2.metric("Grid Load", f"{total_grid_load:.2f} kWh")
+        col3.metric("Grid Charge", f"{total_grid_charge:.2f} kWh")
+        col4.metric("Battery Used", f"{total_battery_load:.2f} kWh")
+        col5.metric("SOC Range", f"{min_soc:.1f}%–{max_soc:.1f}%")
+
+        results_df["soc_percent"] = results_df["soc"] * 100
+        results_df["datetime"] = pd.to_datetime(results_df["time"])
+        results_df["time_label"] = (results_df["datetime"].dt.strftime("%A | %I:%M %p").str.replace("| 0", "| ", regex=False))
+
+        # Battery SOC Over Time
+        st.subheader("Battery SOC Over Time")
+        st.line_chart(
+            results_df.set_index("time_label")[["soc_percent"]]
+        )
+        
+        # Energy Source Breakdown
+        st.subheader("Energy Source Breakdown")
+        energy_df = results_df[[
+            "time_label",
+            "battery_load",
+            "grid_load",
+            "grid_charge"
+        ]].set_index("time_label")
+
+        st.area_chart(energy_df)
+
+        # Cost Over Time
+        st.subheader("Cost Over Time")
+        st.bar_chart(
+            results_df.set_index("time_label")[["cost"]]
+        )
+
+        # Daily Sumamry
+        st.subheader("Daily Summary")
+
+        daily_summary = results_df.groupby("date").agg(
+            total_cost=("cost", "sum"),
+            grid_load=("grid_load", "sum"),
+            grid_charge=("grid_charge", "sum"),
+            battery_load=("battery_load", "sum"),
+            min_soc=("soc", "min"),
+            max_soc=("soc", "max"),
+            avg_pv_kw=("pv_kw", "mean")
+        ).reset_index()
+
+        daily_summary["min_soc"] = daily_summary["min_soc"] * 100
+        daily_summary["max_soc"] = daily_summary["max_soc"] * 100
+
+        st.dataframe(daily_summary, use_container_width=True)
+
+        # Full Details
+        with st.expander("Full Slot-by-Slot Results"):
+            display_df = results_df.copy()
+            display_df["soc"] = (display_df["soc"] * 100).round(1).astype(str) + "%"
+            st.dataframe(display_df, use_container_width=True)
