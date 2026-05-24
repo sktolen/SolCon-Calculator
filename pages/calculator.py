@@ -11,6 +11,133 @@ from algorithm.weather import (
     aggregate_daily_pv,
 )
 
+# ─────────────────────────────────────────────
+#  Page config & global styles
+# ─────────────────────────────────────────────
+
+st.set_page_config(
+    page_title="SolCon v5 · Energy Dispatch Calculator",
+    page_icon="⚡",
+    layout="wide",
+    initial_sidebar_state="collapsed",
+)
+
+st.markdown("""
+<style>
+@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600&family=Fraunces:ital,opsz,wght@0,9..144,300;0,9..144,600;1,9..144,400&display=swap');
+
+:root {
+    --ink:    #0D1117;
+    --ink2:   #161B22;
+    --ink3:   #21262D;
+    --border: #30363D;
+    --text:   #E6EDF3;
+    --text2:  #8B949E;
+    --teal:   #39D353;
+    --amber:  #E3B341;
+    --blue:   #58A6FF;
+    --orange: #F0883E;
+    --red:    #F85149;
+    --mono:   'JetBrains Mono', monospace;
+    --serif:  'Fraunces', serif;
+}
+
+html, body, [class*="css"] {
+    font-family: var(--mono) !important;
+    background-color: var(--ink) !important;
+    color: var(--text) !important;
+}
+
+.main .block-container {
+    max-width: 1400px;
+    padding: 2rem 2.5rem 4rem;
+}
+
+.solcon-title {
+    font-family: var(--serif) !important;
+    font-size: 3rem;
+    font-weight: 600;
+    line-height: 1;
+    color: var(--text);
+    letter-spacing: -0.02em;
+    margin-bottom: 0.25rem;
+}
+.solcon-subtitle {
+    font-family: var(--mono);
+    font-size: 0.72rem;
+    color: var(--text2);
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    margin-bottom: 2rem;
+}
+.solcon-accent { color: var(--teal); }
+
+.section-label {
+    font-family: var(--mono);
+    font-size: 0.65rem;
+    font-weight: 600;
+    letter-spacing: 0.15em;
+    text-transform: uppercase;
+    color: var(--text2);
+    border-bottom: 1px solid var(--border);
+    padding-bottom: 0.4rem;
+    margin-bottom: 1rem;
+}
+
+/* Insight banners — these stay class-based as they're simple enough */
+.insight-warn {
+    background: rgba(248,81,73,0.08);
+    border: 1px solid rgba(248,81,73,0.35);
+    border-left: 3px solid var(--red);
+    border-radius: 5px;
+    padding: 0.65rem 1rem;
+    font-size: 0.78rem;
+    color: var(--text);
+    margin-bottom: 0.6rem;
+}
+.insight-ok {
+    background: rgba(57,211,83,0.07);
+    border: 1px solid rgba(57,211,83,0.25);
+    border-left: 3px solid var(--teal);
+    border-radius: 5px;
+    padding: 0.65rem 1rem;
+    font-size: 0.78rem;
+    color: var(--text);
+    margin-bottom: 0.6rem;
+}
+.insight-info {
+    background: rgba(88,166,255,0.07);
+    border: 1px solid rgba(88,166,255,0.25);
+    border-left: 3px solid var(--blue);
+    border-radius: 5px;
+    padding: 0.65rem 1rem;
+    font-size: 0.78rem;
+    color: var(--text);
+    margin-bottom: 0.6rem;
+}
+
+div[data-testid="stNumberInput"] input,
+div[data-testid="stSelectbox"] select,
+div[data-testid="stTextInput"] input {
+    background: var(--ink2) !important;
+    border: 1px solid var(--border) !important;
+    color: var(--text) !important;
+    border-radius: 4px !important;
+    font-family: var(--mono) !important;
+    font-size: 0.82rem !important;
+}
+
+button[data-baseweb="tab"] {
+    font-family: var(--mono) !important;
+    font-size: 0.72rem !important;
+    letter-spacing: 0.05em !important;
+}
+
+hr { border-color: var(--border) !important; }
+.stDataFrame { border: 1px solid var(--border) !important; border-radius: 5px; }
+</style>
+""", unsafe_allow_html=True)
+
 
 # ─────────────────────────────────────────────
 #  Shared helpers
@@ -47,23 +174,97 @@ def _run_simulation(raw_df, cfg) -> pd.DataFrame:
 # ─────────────────────────────────────────────
 
 def _show_metrics(results_df: pd.DataFrame):
-    total_grid_cost = results_df["grid_cost"].sum()
+    total_grid_cost     = results_df["grid_cost"].sum()
     total_export_credit = results_df["export_credit"].sum()
-    total_net_cost = results_df["net_cost"].sum()
-    total_grid_load = results_df["grid_load"].sum()
-    total_grid_charge = results_df["grid_charge"].sum()
-    total_battery_load = results_df["battery_load"].sum()
+    total_net_cost      = results_df["net_cost"].sum()
+    total_grid_load     = results_df["grid_load"].sum()
+    total_grid_to_batt  = results_df["grid_to_battery"].sum()
+    total_battery_load  = results_df["battery_load"].sum()
     min_soc = results_df["soc"].min() * 100
     max_soc = results_df["soc"].max() * 100
 
-    c1, c2, c3, c4, c5, c6, c7 = st.columns(7)
-    c1.metric("Grid Cost", f"PHP {total_grid_cost:,.2f}")
-    c2.metric("Export Credit", f"PHP {total_export_credit:,.2f}")
-    c3.metric("Net Cost", f"PHP {total_net_cost:,.2f}")
-    c4.metric("Grid Load", f"{total_grid_load:.2f} kWh")
-    c5.metric("Grid Charge", f"{total_grid_charge:.2f} kWh")
-    c6.metric("Battery Used", f"{total_battery_load:.2f} kWh")
-    c7.metric("SOC Range", f"{min_soc:.1f}%–{max_soc:.1f}%")
+    # FIX: all styles are fully inlined — no class lookups across st.markdown calls.
+    # Streamlit scopes injected HTML and can't reliably resolve classes defined in a
+    # separate st.markdown(<style>) block when rendering subsequent markdown blocks.
+    GRADIENTS = [
+        "linear-gradient(135deg,#1d4ed8 0%,#3b82f6 100%)",  # Grid Cost      — blue
+        "linear-gradient(135deg,#6d28d9 0%,#8b5cf6 100%)",  # Export Revenue — purple
+        "linear-gradient(135deg,#b45309 0%,#f59e0b 100%)",  # Net Cost       — amber
+        "linear-gradient(135deg,#0e7490 0%,#22d3ee 100%)",  # Grid Load      — cyan
+        "linear-gradient(135deg,#c2410c 0%,#fb923c 100%)",  # Grid→Battery   — orange
+        "linear-gradient(135deg,#065f46 0%,#34d399 100%)",  # Battery Disc.  — green
+        "linear-gradient(135deg,#1e3a5f 0%,#60a5fa 100%)",  # SOC Range      — steel
+    ]
+
+    cards = [
+        ("Grid Cost",          f"PHP {total_grid_cost:,.2f}",      "total drawn from grid"),
+        ("Export Revenue",     f"PHP {total_export_credit:,.2f}",  "credited to bill"),
+        ("Net Cost",           f"PHP {total_net_cost:,.2f}",       "grid − export"),
+        ("Grid Load",          f"{total_grid_load:.2f} kWh",       "drawn for loads"),
+        ("Grid → Battery",     f"{total_grid_to_batt:.2f} kWh",   "actually stored"),
+        ("Battery Discharged", f"{total_battery_load:.2f} kWh",   "served to loads"),
+        ("SOC Range",          f"{min_soc:.1f}%–{max_soc:.1f}%",  "min / max"),
+    ]
+
+    base   = ("border-radius:16px;padding:1.1rem 0.75rem;min-height:120px;"
+              "display:flex;flex-direction:column;justify-content:center;align-items:center;"
+              "text-align:center;box-shadow:0 4px 16px rgba(0,0,0,0.25);margin-bottom:0.5rem;")
+    s_lbl  = ("color:rgba(255,255,255,0.85);font-size:0.7rem;font-weight:600;"
+               "letter-spacing:0.06em;text-transform:uppercase;margin-bottom:0.5rem;line-height:1.2;")
+    s_val  = ("color:#ffffff;font-size:1.15rem;font-weight:800;line-height:1.1;"
+               "margin-bottom:0.3rem;font-family:'JetBrains Mono',monospace;")
+    s_sub  = "color:rgba(255,255,255,0.65);font-size:0.65rem;line-height:1.2;"
+
+    cols = st.columns(len(cards))
+    for col, (label, value, sub), grad in zip(cols, cards, GRADIENTS):
+        with col:
+            st.markdown(
+                f'<div style="{base}background:{grad};">'
+                f'<div style="{s_lbl}">{label}</div>'
+                f'<div style="{s_val}">{value}</div>'
+                f'<div style="{s_sub}">{sub}</div>'
+                f'</div>',
+                unsafe_allow_html=True,
+            )
+
+
+# ─────────────────────────────────────────────
+#  Simulation insights
+# ─────────────────────────────────────────────
+
+def _show_simulation_insights(results_df: pd.DataFrame, cfg: SystemConfig):
+    total_export = results_df["export_kwh"].sum()
+    min_soc      = results_df["soc"].min() * 100
+    floor_pct    = cfg.soc_floor * 100
+
+    # SOC floor breach
+    if min_soc <= floor_pct:
+        st.markdown(
+            f'<div class="insight-warn">⚠️ Battery hit the SOC floor ({floor_pct:.0f}%) during the simulation. '
+            f'Lowest recorded SOC: <strong>{min_soc:.1f}%</strong>. '
+            f'Consider increasing the grid-charge target or reducing non-critical loads.</div>',
+            unsafe_allow_html=True,
+        )
+    else:
+        st.markdown(
+            f'<div class="insight-ok">✓ Battery stayed above the SOC floor ({floor_pct:.0f}%) throughout. '
+            f'Lowest SOC recorded: <strong>{min_soc:.1f}%</strong>.</div>',
+            unsafe_allow_html=True,
+        )
+
+    # Export
+    if total_export <= 0:
+        st.markdown(
+            '<div class="insight-info">ℹ️ No surplus solar was exported to the grid — all generation was '
+            'consumed internally or stored in the battery.</div>',
+            unsafe_allow_html=True,
+        )
+    else:
+        st.markdown(
+            f'<div class="insight-info">ℹ️ <strong>{total_export:.2f} kWh</strong> exported to Meralco grid '
+            f'(PHP {results_df["export_credit"].sum():,.2f} in net-metering credits).</div>',
+            unsafe_allow_html=True,
+        )
 
 
 # ─────────────────────────────────────────────
@@ -73,14 +274,17 @@ def _show_metrics(results_df: pd.DataFrame):
 def _show_charts(results_df: pd.DataFrame, index_col: str = "time_label"):
     idx = results_df.set_index(index_col)
 
-    st.subheader("Battery SOC Over Time")
-    st.line_chart(idx[["soc_percent"]])
+    st.markdown('<div class="section-label">Battery State of Charge</div>', unsafe_allow_html=True)
+    st.line_chart(idx[["soc_percent"]], color=["#39D353"])
 
-    st.subheader("Energy Source Breakdown")
-    st.area_chart(idx[["battery_load", "grid_load", "grid_charge"]])
+    st.markdown('<div class="section-label">Energy Source Breakdown (kWh per slot)</div>', unsafe_allow_html=True)
+    st.area_chart(
+        idx[["battery_load", "grid_load", "grid_to_battery"]],
+        color=["#58A6FF", "#F85149", "#F0883E"],
+    )
 
-    st.subheader("Cost Over Time")
-    st.bar_chart(idx[["net_cost"]])
+    st.markdown('<div class="section-label">Net Cost per Slot (PHP)</div>', unsafe_allow_html=True)
+    st.bar_chart(idx[["net_cost"]], color=["#E3B341"])
 
 
 # ─────────────────────────────────────────────
@@ -88,27 +292,25 @@ def _show_charts(results_df: pd.DataFrame, index_col: str = "time_label"):
 # ─────────────────────────────────────────────
 
 def _show_charts_daily_agg(results_df: pd.DataFrame):
-    st.subheader("Battery SOC Over Time")
-    st.line_chart(results_df.set_index("datetime")[["soc_percent"]])
+    st.markdown('<div class="section-label">Battery SOC Over Time (avg per slot)</div>', unsafe_allow_html=True)
+    st.line_chart(results_df.set_index("datetime")[["soc_percent"]], color=["#39D353"])
 
-    st.subheader("Daily Energy Source Breakdown")
+    st.markdown('<div class="section-label">Daily Energy Source Breakdown (kWh)</div>', unsafe_allow_html=True)
     daily_energy = (
-        results_df.groupby("date")[["battery_load", "grid_load", "grid_charge"]]
+        results_df.groupby("date")[["battery_load", "grid_load", "grid_to_battery"]]
         .sum()
     )
-    st.area_chart(daily_energy)
+    st.area_chart(daily_energy, color=["#58A6FF", "#F85149", "#F0883E"])
 
-    st.subheader("Daily Cost")
-    daily_cost = results_df.groupby("date")[["net_cost"]].sum()
-    st.bar_chart(daily_cost)
+    _show_net_bill_chart(results_df, period="daily")
 
 
 # ─────────────────────────────────────────────
-#  Daily summary table (used by all tabs)
+#  Daily summary table
 # ─────────────────────────────────────────────
 
 def _show_daily_summary(results_df: pd.DataFrame):
-    st.subheader("Daily Summary")
+    st.markdown('<div class="section-label">Daily Summary</div>', unsafe_allow_html=True)
     daily = (
         results_df.groupby("date")
         .agg(
@@ -116,7 +318,7 @@ def _show_daily_summary(results_df: pd.DataFrame):
             export_credit=("export_credit", "sum"),
             net_cost=("net_cost", "sum"),
             grid_load=("grid_load", "sum"),
-            grid_charge=("grid_charge", "sum"),
+            grid_to_battery=("grid_to_battery", "sum"),
             battery_load=("battery_load", "sum"),
             export_kwh=("export_kwh", "sum"),
             min_soc=("soc", "min"),
@@ -131,7 +333,7 @@ def _show_daily_summary(results_df: pd.DataFrame):
 
 
 # ─────────────────────────────────────────────
-#  Monthly breakdown (used in Annual tab)
+#  Monthly breakdown (Annual tab)
 # ─────────────────────────────────────────────
 
 def _show_monthly_breakdown(results_df: pd.DataFrame):
@@ -145,7 +347,7 @@ def _show_monthly_breakdown(results_df: pd.DataFrame):
             export_credit=("export_credit", "sum"),
             net_cost=("net_cost", "sum"),
             grid_load=("grid_load", "sum"),
-            grid_charge=("grid_charge", "sum"),
+            grid_to_battery=("grid_to_battery", "sum"),
             battery_load=("battery_load", "sum"),
             export_kwh=("export_kwh", "sum"),
             avg_pv_kw=("pv_kw", "mean"),
@@ -153,14 +355,51 @@ def _show_monthly_breakdown(results_df: pd.DataFrame):
         .reset_index()
     )
 
-    st.subheader("Monthly Breakdown")
+    st.markdown('<div class="section-label">Monthly Breakdown</div>', unsafe_allow_html=True)
     st.dataframe(monthly, use_container_width=True)
 
-    st.subheader("Monthly Net Cost")
-    st.bar_chart(monthly.set_index("month")[["net_cost"]])
+    _show_net_bill_chart(results_df, period="monthly")
 
-    st.subheader("Monthly Energy Sources")
-    st.area_chart(monthly.set_index("month")[["battery_load", "grid_load", "grid_charge"]])
+    st.markdown('<div class="section-label">Monthly Energy Sources (kWh)</div>', unsafe_allow_html=True)
+    st.area_chart(
+        monthly.set_index("month")[["battery_load", "grid_load", "grid_to_battery"]],
+        color=["#58A6FF", "#F85149", "#F0883E"],
+    )
+
+
+# ─────────────────────────────────────────────
+#  Net bill chart (shared)
+# ─────────────────────────────────────────────
+
+def _show_net_bill_chart(results_df: pd.DataFrame, period: str = "daily"):
+    df = results_df.copy()
+    if "datetime" not in df.columns:
+        df["datetime"] = pd.to_datetime(df["time"])
+
+    if period == "daily":
+        df["period"] = df["datetime"].dt.strftime("%b %d")
+        title = "Daily Net Bill — Grid Cost vs Export Revenue"
+    else:
+        df["period"] = df["datetime"].dt.to_period("M").astype(str)
+        title = "Monthly Net Bill — Grid Cost vs Export Revenue"
+
+    bill = (
+        df.groupby("period")
+        .agg(
+            grid_cost=("grid_cost", "sum"),
+            export_credit=("export_credit", "sum"),
+        )
+        .reset_index()
+    )
+    bill["grid_cost"]     = bill["grid_cost"].round(2)
+    bill["export_credit"] = -bill["export_credit"].round(2)
+
+    st.markdown(f'<div class="section-label">{title}</div>', unsafe_allow_html=True)
+    st.bar_chart(
+        bill.set_index("period")[["grid_cost", "export_credit"]],
+        color=["#F85149", "#39D353"],
+    )
+    st.caption("Red = grid cost · Green = export credit (negative = earned)")
 
 
 # ─────────────────────────────────────────────
@@ -169,7 +408,7 @@ def _show_monthly_breakdown(results_df: pd.DataFrame):
 
 def _tab_daily(cfg: SystemConfig):
     st.caption("3-day forecast starting today.")
-    if not st.button("▶ Run Daily Simulation", type="primary", key="run_daily"):
+    if not st.button("▶ Run Biweekly Simulation", type="primary", key="run_daily"):
         return
 
     with st.spinner("Fetching 3-day forecast…"):
@@ -178,8 +417,11 @@ def _tab_daily(cfg: SystemConfig):
     with st.spinner("Running simulation…"):
         results_df = _run_simulation(raw_df, cfg)
 
-    st.subheader("Simulation Results")
+    st.divider()
+    st.subheader("Summary")
+
     _show_metrics(results_df)
+    _show_simulation_insights(results_df, cfg)
     _show_charts(results_df)
     _show_daily_summary(results_df)
 
@@ -190,7 +432,7 @@ def _tab_daily(cfg: SystemConfig):
 
 
 def _tab_weekly(cfg: SystemConfig):
-    today = datetime.date.today()
+    today  = datetime.date.today()
     monday = today - datetime.timedelta(days=today.weekday())
     sunday = monday + datetime.timedelta(days=6)
     st.caption(
@@ -206,8 +448,11 @@ def _tab_weekly(cfg: SystemConfig):
     with st.spinner("Running simulation…"):
         results_df = _run_simulation(raw_df, cfg)
 
-    st.subheader("Simulation Results")
+    st.divider()
+    st.subheader("Summary")
+
     _show_metrics(results_df)
+    _show_simulation_insights(results_df, cfg)
     _show_charts(results_df)
     _show_daily_summary(results_df)
 
@@ -218,7 +463,7 @@ def _tab_weekly(cfg: SystemConfig):
 
 
 def _tab_monthly(cfg: SystemConfig):
-    today = datetime.date.today()
+    today      = datetime.date.today()
     month_name = today.strftime("%B %Y")
     st.caption(
         f"Historical data from the 1st of {month_name} through yesterday, "
@@ -233,8 +478,11 @@ def _tab_monthly(cfg: SystemConfig):
     with st.spinner("Running simulation…"):
         results_df = _run_simulation(raw_df, cfg)
 
-    st.subheader("Simulation Results")
+    st.divider()
+    st.subheader("Summary")
+
     _show_metrics(results_df)
+    _show_simulation_insights(results_df, cfg)
     _show_charts_daily_agg(results_df)
     _show_daily_summary(results_df)
 
@@ -247,8 +495,7 @@ def _tab_monthly(cfg: SystemConfig):
 def _tab_annual(cfg: SystemConfig):
     prev_year = datetime.date.today().year - 1
     st.caption(
-        f"Historical data for the full year {prev_year} "
-        f"(Jan 1 – Dec 31). This may take a moment to fetch."
+        f"Historical data for the full year {prev_year} (Jan 1 – Dec 31)."
     )
     if not st.button("▶ Run Annual Simulation", type="primary", key="run_annual"):
         return
@@ -259,13 +506,16 @@ def _tab_annual(cfg: SystemConfig):
     with st.spinner("Running simulation (365 days)…"):
         results_df = _run_simulation(raw_df, cfg)
 
-    st.subheader("Simulation Results")
+    st.divider()
+    st.subheader("Summary")
+
     _show_metrics(results_df)
+    _show_simulation_insights(results_df, cfg)
     _show_monthly_breakdown(results_df)
 
-    st.subheader("Daily SOC Over Time")
+    st.markdown('<div class="section-label">Daily Average SOC Over the Year</div>', unsafe_allow_html=True)
     daily_soc = results_df.groupby("date")["soc_percent"].mean()
-    st.line_chart(daily_soc)
+    st.line_chart(daily_soc, color=["#39D353"])
 
     _show_daily_summary(results_df)
 
@@ -280,50 +530,51 @@ def _tab_annual(cfg: SystemConfig):
 # ─────────────────────────────────────────────
 
 def show_calculator():
-    st.header("Calculator")
+    st.markdown("""
+    <div class="solcon-title">SOL<span class="solcon-accent">CON</span> <span style="font-size:1.6rem;color:#8B949E">v5</span></div>
+    <div class="solcon-subtitle">Energy Dispatch Calculator · PV-BESS Simulation</div>
+    """, unsafe_allow_html=True)
+
+    st.divider()
 
     col1, col2, col3 = st.columns(3)
 
     with col1:
-        st.markdown(
-            '<div style="font-weight:bold; color:gray; text-transform:uppercase;">Hardware</div>',
-            unsafe_allow_html=True,
-        )
-        battery_capacity = st.number_input("Battery Capacity (kWh)", min_value=0.1, value=16.59, step=0.01)
-        soc_floor = st.number_input("Min SOC Floor (%)", min_value=0, max_value=100, value=20)
-        pv_capacity = st.number_input("PV System Capacity (kWp)", min_value=0.1, value=8.0, step=0.1)
-        soc_max = st.number_input("Maximum SOC (%)", min_value=0, max_value=100, value=100)
+        st.markdown('<div class="section-label">Hardware</div>', unsafe_allow_html=True)
+        battery_capacity  = st.number_input("Battery Capacity (kWh)",   min_value=0.1, value=16.59, step=0.01)
+        soc_floor         = st.number_input("Min SOC Floor (%)",        min_value=0,   max_value=100, value=20)
+        pv_capacity       = st.number_input("PV System Capacity (kWp)", min_value=0.1, value=8.0, step=0.1)
+        soc_max           = st.number_input("Maximum SOC (%)",          min_value=0,   max_value=100, value=100)
         system_efficiency = st.slider(
             "System Performance Ratio",
             min_value=0.50, max_value=1.00, value=0.80, step=0.01,
-            help="Accounts for heat, wiring, inverter losses. 0.80 = 80% efficient.",
+            help="Accounts for heat, wiring, and inverter losses. 0.80 = 80% efficient.",
         )
 
     with col2:
-        st.markdown(
-            '<div style="font-weight:bold; color:gray; text-transform:uppercase;">Electricity Rates (PHP / kWh)</div>',
-            unsafe_allow_html=True,
-        )
-        import_rate = st.number_input("Import / Flat Rate", min_value=0.0, value=15.68, step=0.01,
-                                      help="What Meralco charges you on a standard flat tariff.")
-        peak_rate = st.number_input("TOU Peak Rate", min_value=0.0, value=17.27, step=0.01,
-                                    help="Rate during peak hours.")
-        offpeak_rate = st.number_input("TOU Off-Peak Rate", min_value=0.0, value=13.54, step=0.01,
+        st.markdown('<div class="section-label">Electricity Rates (PHP / kWh)</div>', unsafe_allow_html=True)
+        import_rate  = st.number_input("Import / Flat Rate",       min_value=0.0, value=15.68, step=0.01,
+                                       help="Meralco standard flat tariff.")
+        peak_rate    = st.number_input("TOU Peak Rate",            min_value=0.0, value=17.27, step=0.01,
+                                       help="Rate during peak hours (08:00–21:00 Mon–Sat, 18:00–20:00 Sun).")
+        offpeak_rate = st.number_input("TOU Off-Peak Rate",        min_value=0.0, value=13.54, step=0.01,
                                        help="Rate during all other hours.")
-        export_rate = st.number_input("Net Metering Export Rate", min_value=0.0, value=8.80, step=0.01,
-                                      help="PHP/kWh credited when surplus solar is exported.")
+        export_rate  = st.number_input("Net Metering Export Rate", min_value=0.0, value=8.80,  step=0.01,
+                                       help="PHP/kWh credited when surplus solar is exported to Meralco.")
 
     with col3:
-        st.markdown(
-            '<div style="font-weight:bold; color:gray; text-transform:uppercase;">Algorithm & Location</div>',
-            unsafe_allow_html=True,
-        )
+        st.markdown('<div class="section-label">Algorithm & Location</div>', unsafe_allow_html=True)
         algorithm_mode = st.selectbox(
             "Algorithm Mode",
-            ["SOLCON v5.1 - TOU + Load Shedding", "SOLCON v5.2 - TOU + No Load Shedding"],
+            [
+                "SOLCON v5.1 - TOU + Load Shedding",
+                "SOLCON v5.2 - TOU + No Load Shedding",
+            ],
         )
-        latitude = st.number_input("Latitude", value=14.6760, format="%.4f")
-        longitude = st.number_input("Longitude", value=121.0437, format="%.4f")
+        latitude  = st.number_input("Latitude",  value=14.6760, format="%.4f",
+                                    help="Latitude of the location for weather data.")
+        longitude = st.number_input("Longitude", value=121.0437, format="%.4f",
+                                    help="Longitude of the location for weather data.")
 
     cfg = SystemConfig(
         battery_capacity=battery_capacity,
@@ -340,11 +591,12 @@ def show_calculator():
         longitude=longitude,
     )
 
-    st.divider()
-
-    tab_daily, tab_weekly, tab_monthly, tab_annual = st.tabs(
-        ["📅 Daily (3 days)", "📆 Weekly (Mon–Sun)", "🗓️ Monthly", "📊 Annual"]
-    )
+    tab_daily, tab_weekly, tab_monthly, tab_annual = st.tabs([
+        "Biweekly",
+        "Weekly",
+        "Monthly",
+        "Annual",
+    ])
 
     with tab_daily:
         _tab_daily(cfg)
