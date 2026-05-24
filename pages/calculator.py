@@ -2,7 +2,8 @@ import streamlit as st
 import pandas as pd
 import datetime
 from algorithm.basic_algorithm import simulate_basic
-from algorithm.solcon_v51 import SystemConfig, simulate_solcon
+from algorithm.solcon_v51 import SystemConfig, simulate_solcon as simulate_solcon_v51
+from algorithm.solcon_v52 import simulate_solcon as simulate_solcon_v52
 from algorithm.weather import (
     get_weather_forecast,
     get_weather_weekly,
@@ -167,12 +168,22 @@ def _run_simulation(raw_df, cfg) -> pd.DataFrame:
     prepared = prepare_weather_data(raw_df, cfg)
     daily_kwh = aggregate_daily_pv(prepared)
     start_weekday = _start_weekday_for(prepared)
-    results = simulate_solcon(
-        pv_data=prepared,
-        daily_kwh=daily_kwh,
-        start_weekday=start_weekday,
-        cfg=cfg,
-    )
+
+    if cfg.algorithm_mode == "SOLCON v5.2 - TOU + No Load Shedding":
+        results = simulate_solcon_v52(
+            pv_data=prepared,
+            daily_kwh=daily_kwh,
+            start_weekday=start_weekday,
+            cfg=cfg,
+        )
+    else:
+        results = simulate_solcon_v51(
+            pv_data=prepared,
+            daily_kwh=daily_kwh,
+            start_weekday=start_weekday,
+            cfg=cfg,
+        )
+
     df = pd.DataFrame(results)
     df["soc_percent"] = df["soc"] * 100
     df["datetime"] = pd.to_datetime(df["time"])
