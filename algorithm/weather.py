@@ -37,22 +37,30 @@ def get_weather_forecast(latitude, longitude, forecast_days=3):
 
 
 def get_weather_historical(latitude, longitude, start_date: str, end_date: str):
-    """
-    Fetch historical weather from Open-Meteo Archive API.
-    start_date / end_date: 'YYYY-MM-DD'
-    """
     url = "https://archive-api.open-meteo.com/v1/archive"
-    params = {
-        "latitude": latitude,
-        "longitude": longitude,
-        "start_date": start_date,
-        "end_date": end_date,
-        "minutely_15": MINUTELY_15_VARS,
-        "timezone": "Asia/Manila"
-    }
-    response = requests.get(url, params=params)
+
+    for interval in ["minutely_15", "hourly"]:
+        params = {
+            "latitude": latitude,
+            "longitude": longitude,
+            "start_date": start_date,
+            "end_date": end_date,
+            interval: MINUTELY_15_VARS,
+            "timezone": "Asia/Manila"
+        }
+        response = requests.get(url, params=params)
+        if response.status_code == 200:
+            data = response.json()
+            if interval in data:
+                return pd.DataFrame({
+                    "time": data[interval]["time"],
+                    "cloud_cover": data[interval]["cloud_cover"],
+                    "shortwave_radiation": data[interval]["shortwave_radiation"],
+                    "precipitation": data[interval]["precipitation"],
+                    "temperature": data[interval]["temperature_2m"],
+                })
+
     response.raise_for_status()
-    return _parse_response(response.json())
 
 
 def get_weather_weekly(latitude, longitude):
