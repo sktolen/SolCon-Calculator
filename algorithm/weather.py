@@ -3,7 +3,7 @@ import pandas as pd
 import datetime
 
 
-HOURLY_VARS = [
+MINUTELY_15_VARS = [
     "cloud_cover",
     "shortwave_radiation",
     "precipitation",
@@ -13,11 +13,11 @@ HOURLY_VARS = [
 
 def _parse_response(data):
     return pd.DataFrame({
-        "time": data["hourly"]["time"],
-        "cloud_cover": data["hourly"]["cloud_cover"],
-        "shortwave_radiation": data["hourly"]["shortwave_radiation"],
-        "precipitation": data["hourly"]["precipitation"],
-        "temperature": data["hourly"]["temperature_2m"],
+        "time": data["minutely_15"]["time"],
+        "cloud_cover": data["minutely_15"]["cloud_cover"],
+        "shortwave_radiation": data["minutely_15"]["shortwave_radiation"],
+        "precipitation": data["minutely_15"]["precipitation"],
+        "temperature": data["minutely_15"]["temperature_2m"],
     })
 
 
@@ -27,7 +27,7 @@ def get_weather_forecast(latitude, longitude, forecast_days=3):
     params = {
         "latitude": latitude,
         "longitude": longitude,
-        "hourly": HOURLY_VARS,
+        "minutely_15": MINUTELY_15_VARS,  # was "hourly"
         "forecast_days": forecast_days,
         "timezone": "Asia/Manila"
     }
@@ -47,7 +47,7 @@ def get_weather_historical(latitude, longitude, start_date: str, end_date: str):
         "longitude": longitude,
         "start_date": start_date,
         "end_date": end_date,
-        "hourly": HOURLY_VARS,
+        "minutely_15": MINUTELY_15_VARS,
         "timezone": "Asia/Manila"
     }
     response = requests.get(url, params=params)
@@ -79,7 +79,13 @@ def get_weather_weekly(latitude, longitude):
         frames.append(hist_df)
 
     # Forecast: today → Sunday
-    days_remaining = (sunday - today).days + 1  # inclusive
+    if today.month == 12:
+        next_month = today.replace(year=today.year + 1, month=1, day=1)
+    else:
+        next_month = today.replace(month=today.month + 1, day=1)
+    days_remaining = (next_month - today).days
+    days_remaining = max(1, min(days_remaining, 16))
+
     forecast_df = get_weather_forecast(latitude, longitude, forecast_days=days_remaining)
     frames.append(forecast_df)
 
@@ -111,8 +117,12 @@ def get_weather_monthly(latitude, longitude):
         frames.append(hist_df)
 
     # Forecast: today → end of month
-    days_remaining = (today.replace(month=today.month % 12 + 1, day=1) - today).days
-    days_remaining = max(1, min(days_remaining, 16))  # open-meteo max forecast is 16 days
+    if today.month == 12:
+        next_month = today.replace(year=today.year + 1, month=1, day=1)
+    else:
+        next_month = today.replace(month=today.month + 1, day=1)
+    days_remaining = max(1, min((next_month - today).days, 16))
+
     forecast_df = get_weather_forecast(latitude, longitude, forecast_days=days_remaining)
     frames.append(forecast_df)
 
@@ -144,30 +154,27 @@ def calculate_pv_kw(irradiance, cfg):
 def prepare_weather_data(forecast_df, cfg):
     forecast_df = forecast_df.copy()
     forecast_df["time"] = pd.to_datetime(forecast_df["time"])
+    forecast_df = forecast_df.set_index("time")
+
+    # Resample 15-min → 30-min (average irradiance, cloud cover, temp; sum precip)
+    forecast_df = forecast_df.resample("30min").agg({
+        "shortwave_radiation": "mean",
+        "cloud_cover": "mean",
+        "precipitation": "sum",
+        "temperature": "mean",
+    }).reset_index()
 
     forecast_df["pv_kw"] = forecast_df["shortwave_radiation"].apply(
         lambda x: calculate_pv_kw(x, cfg)
     )
 
     forecast_df["date"] = forecast_df["time"].dt.strftime("%Y-%m-%d")
-    forecast_df["slot"] = forecast_df["time"].dt.hour * 2
+    forecast_df["slot"] = forecast_df["time"].dt.hour * 2 + (forecast_df["time"].dt.minute // 30)
 
     return forecast_df
 
 
 def aggregate_daily_pv(forecast_df):
-    daily_kwh = (
-        forecast_df
-        .groupby("date")["pv_kw"]
-        .sum()
-    )
+    daily_kwh = forecast_df.groupby("date")["pv_kw"].sum() * 0.5
+
     return daily_kwh.to_dict()
-
-
-def classify_forecast(daily_kwh):
-    if daily_kwh > 20:
-        return "HIGH"
-    elif daily_kwh >= 10:
-        return "MEDIUM"
-    else:
-        return "LOW"
