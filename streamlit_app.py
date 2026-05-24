@@ -16,39 +16,36 @@ logo_path = os.path.join(parent_dir, "images/solcon_icon.svg")
 
 styles = {
     "nav": {
-        "background-color": "#e9e9e9",
-        "justify-content": "left",
+        "background-color": "#f5f5f5",
+        "display": "flex",
+        "justify-content": "flex-start",
         "align-items": "center",
-        "padding": "0.75rem 5vw",
+        "padding": "0 2rem",
+        "height": "56px",
+        "box-shadow": "0 1px 0 rgba(0,0,0,0.08)",
     },
 
     "img": {
         "height": "100px",
-        "padding-right": "14px",
-        "line-height": "1",
-        "display": "inline-flex",
-        "align-items": "center",
+        "margin-right": "2rem",
     },
 
     "span": {
-        "color": "#111827",
-        "padding": "0.55rem 1rem",
-        "border-radius": "999px",
-        "font-weight": "500",
-        "line-height": "1",
-        "display": "inline-flex",
-        "align-items": "center",
-        "height": "40px",
+        "color": "#374151",
+        "padding": "0.4rem 0.75rem",
+        "border-radius": "6px",
+        "font-size": "0.875rem",
+        "font-weight": "400",
     },
 
     "active": {
         "background-color": "#DCFCE7",
-        "color": "var(--text-color)",
-        "font-weight": "700",
+        "color": "#166534",
+        "font-weight": "600",
     },
 
     "hover": {
-        "background-color": "#F3F4F6",
+        "background-color": "#ebebeb",
     },
 }
 
@@ -57,14 +54,22 @@ options = {
     "show_sidebar": False,
 }
 
+# ── Track current page in session state so Home is highlighted on first load ──
+if "current_page" not in st.session_state:
+    st.session_state.current_page = "Home"
+
 page = st_navbar(
     pages,
-    selected="Home",
+    selected=st.session_state.current_page,   # ← reflects active page, not hardcoded
     logo_path=logo_path,
     logo_page="SolCon",
     styles=styles,
     options=options,
 )
+
+# Update session state when user navigates
+if page and page != "SolCon":
+    st.session_state.current_page = page
 
 functions = {
     "Home": pg.show_home,
