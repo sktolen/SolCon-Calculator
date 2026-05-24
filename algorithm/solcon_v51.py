@@ -284,12 +284,18 @@ def simulate_solcon(pv_data, daily_kwh, start_weekday, cfg):
         # grid charging
         soc += (gc * cfg.system_efficiency) / cfg.battery_capacity
 
+        # PV export: excess after battery is full (before clamping)
+        battery_headroom = (cfg.soc_max - soc) * cfg.battery_capacity
+        export_kwh = max(0, excess_pv - battery_headroom / cfg.system_efficiency)
+
         # clamp SOC
         soc = max(cfg.soc_floor, min(cfg.soc_max, soc))
 
-        # compute grid cost
+        # compute grid cost and net cost
         rate = cfg.peak_rate if is_peak else cfg.offpeak_rate
-        cost = (gl + gc) * rate
+        grid_cost = (gl + gc) * rate
+        export_credit = export_kwh * cfg.export_rate
+        net_cost = grid_cost - export_credit
 
         results.append({
             "time": row["time"],
@@ -307,8 +313,13 @@ def simulate_solcon(pv_data, daily_kwh, start_weekday, cfg):
             "grid_charge": gc,
             "soc": soc,
             "rate": rate,
-            "cost": cost
+            "export_kwh": export_kwh,
+            "export_credit": export_credit,
+            "grid_cost": grid_cost,
+            "net_cost": net_cost,
         })
+
+    
 
     return results
 

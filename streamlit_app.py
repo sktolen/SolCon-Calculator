@@ -16,7 +16,7 @@ logo_path = os.path.join(parent_dir, "images/solcon_icon.svg")
 
 styles = {
     "nav": {
-        "background-color": "#a7f685",
+        "background-color": "#e9e9e9",
         "justify-content": "left",
         "align-items": "center",
         "padding": "0.75rem 5vw",
