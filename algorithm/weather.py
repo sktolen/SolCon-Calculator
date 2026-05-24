@@ -164,13 +164,29 @@ def prepare_weather_data(forecast_df, cfg):
     forecast_df["time"] = pd.to_datetime(forecast_df["time"])
     forecast_df = forecast_df.set_index("time")
 
-    # Resample 15-min → 30-min (average irradiance, cloud cover, temp; sum precip)
-    forecast_df = forecast_df.resample("30min").agg({
-        "shortwave_radiation": "mean",
-        "cloud_cover": "mean",
-        "precipitation": "sum",
-        "temperature": "mean",
-    }).reset_index()
+    # Detect resolution
+    time_diffs = forecast_df.index.to_series().diff().dropna()
+    median_minutes = time_diffs.median().total_seconds() / 60
+
+    if median_minutes <= 15:
+        # 15-min data → resample to 30-min
+        forecast_df = forecast_df.resample("30min").agg({
+            "shortwave_radiation": "mean",
+            "cloud_cover": "mean",
+            "precipitation": "sum",
+            "temperature": "mean",
+        })
+    elif median_minutes <= 60:
+        # Hourly data → resample to 30-min with interpolation
+        forecast_df = forecast_df.resample("30min").interpolate(method="linear")
+    
+    forecast_df = forecast_df.reset_index()
+
+    # Fill any remaining NaNs to be safe
+    forecast_df["shortwave_radiation"] = forecast_df["shortwave_radiation"].fillna(0)
+    forecast_df["cloud_cover"] = forecast_df["cloud_cover"].fillna(0)
+    forecast_df["precipitation"] = forecast_df["precipitation"].fillna(0)
+    forecast_df["temperature"] = forecast_df["temperature"].ffill().bfill()
 
     forecast_df["pv_kw"] = forecast_df["shortwave_radiation"].apply(
         lambda x: calculate_pv_kw(x, cfg)
