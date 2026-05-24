@@ -12,7 +12,7 @@ st.set_page_config(
 pages = ["Home", "Calculator", "How It Works", "About Us"]
 
 parent_dir = os.path.dirname(os.path.abspath(__file__))
-logo_path = os.path.join(parent_dir, "solcon_icon.svg")
+logo_path = os.path.join(parent_dir, "images/solcon_icon.svg")
 
 styles = {
     "nav": {
