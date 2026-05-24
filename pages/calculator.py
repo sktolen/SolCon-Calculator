@@ -180,8 +180,7 @@ def _show_metrics(results_df: pd.DataFrame):
     total_grid_load     = results_df["grid_load"].sum()
     total_grid_to_batt  = results_df["grid_to_battery"].sum()
     total_battery_load  = results_df["battery_load"].sum()
-    min_soc = results_df["soc"].min() * 100
-    max_soc = results_df["soc"].max() * 100
+    total_pv_gen = results_df["pv_kw"].sum() * 0.25   # kW × 0.25 hr = kWh
 
     # FIX: all styles are fully inlined — no class lookups across st.markdown calls.
     # Streamlit scopes injected HTML and can't reliably resolve classes defined in a
@@ -197,13 +196,13 @@ def _show_metrics(results_df: pd.DataFrame):
     ]
 
     cards = [
-        ("Grid Cost",          f"PHP {total_grid_cost:,.2f}",      "total drawn from grid"),
-        ("Export Revenue",     f"PHP {total_export_credit:,.2f}",  "credited to bill"),
-        ("Net Cost",           f"PHP {total_net_cost:,.2f}",       "grid − export"),
-        ("Grid Load",          f"{total_grid_load:.2f} kWh",       "drawn for loads"),
-        ("Grid → Battery",     f"{total_grid_to_batt:.2f} kWh",   "actually stored"),
-        ("Battery Discharged", f"{total_battery_load:.2f} kWh",   "served to loads"),
-        ("SOC Range",          f"{min_soc:.1f}%–{max_soc:.1f}%",  "min / max"),
+        ("Grid Cost",          f"PHP {total_grid_cost:,.2f}",      "Amount paid for grid energy consumed"),
+        ("Export Revenue",     f"PHP {total_export_credit:,.2f}",  "Net metering amount earned"),
+        ("Net Cost",           f"PHP {total_net_cost:,.2f}",       "Grid cost minus net metering"),
+        ("Grid Load",          f"{total_grid_load:.2f} kWh",       "Drawn energy from grid to loads"),
+        ("Grid to Battery",     f"{total_grid_to_batt:.2f} kWh",   "Grid energy used to charge battery"),
+        ("Battery Discharged", f"{total_battery_load:.2f} kWh",    "Energy discharged to serve loads"),
+        ("PV Generated",        f"{total_pv_gen:.2f} kWh",         "Total solar energy produced"),
     ]
 
     base   = ("border-radius:16px;padding:1.1rem 0.75rem;min-height:120px;"
@@ -271,20 +270,52 @@ def _show_simulation_insights(results_df: pd.DataFrame, cfg: SystemConfig):
 #  Charts (slot-level — daily & weekly)
 # ─────────────────────────────────────────────
 
-def _show_charts(results_df: pd.DataFrame, index_col: str = "time_label"):
-    idx = results_df.set_index(index_col)
+def _show_charts(results_df: pd.DataFrame, index_col: str = "time_label", soc_resolution: str = "hourly"):
+    
+    # Hourly aggregation for all charts
+    hourly = (
+        results_df.copy()
+        .assign(hour=pd.to_datetime(results_df["time"]).dt.floor("h"))
+        .groupby("hour")
+        .agg(
+            soc_percent=("soc_percent", "mean"),
+            battery_load=("battery_load", "sum"),
+            grid_load=("grid_load", "sum"),
+            grid_to_battery=("grid_to_battery", "sum"),
+            net_cost=("net_cost", "sum"),
+        )
+    )
 
-    st.markdown('<div class="section-label">Battery State of Charge</div>', unsafe_allow_html=True)
-    st.line_chart(idx[["soc_percent"]], color=["#39D353"])
+     
+    st.markdown('')
+    st.markdown('<div style="font-weight:bold; color:gray; text-transform:uppercase;">Battery State of Charge (hourly avg)</div>',unsafe_allow_html=True)
+    st.line_chart(hourly[["soc_percent"]], color=["#39D353"])
 
-    st.markdown('<div class="section-label">Energy Source Breakdown (kWh per slot)</div>', unsafe_allow_html=True)
+    st.markdown('')
+    st.markdown('<div style="font-weight:bold; color:gray; text-transform:uppercase;">Energy Source Breakdown (kWh per hour)</div>', unsafe_allow_html=True)
     st.area_chart(
-        idx[["battery_load", "grid_load", "grid_to_battery"]],
+        hourly[["battery_load", "grid_load", "grid_to_battery"]],
         color=["#58A6FF", "#F85149", "#F0883E"],
     )
 
-    st.markdown('<div class="section-label">Net Cost per Slot (PHP)</div>', unsafe_allow_html=True)
-    st.bar_chart(idx[["net_cost"]], color=["#E3B341"])
+    st.markdown('')
+    st.markdown('<div style="font-weight:bold; color:gray; text-transform:uppercase;">Net Cost per Hour (PHP)</div>', unsafe_allow_html=True)
+    hourly_bill = (
+        results_df.copy()
+        .assign(hour=pd.to_datetime(results_df["time"]).dt.floor("h"))
+        .groupby("hour")
+        .agg(
+            grid_cost=("grid_cost", "sum"),
+            export_credit=("export_credit", "sum"),
+        )
+    )
+    hourly_bill["export_credit"] = -hourly_bill["export_credit"]
+
+    st.bar_chart(
+        hourly_bill[["grid_cost", "export_credit"]],
+        color=["#F85149", "#39D353"],
+    )
+    st.caption("Red = grid cost · Green = export credit (negative = earned)")
 
 
 # ─────────────────────────────────────────────
@@ -292,10 +323,12 @@ def _show_charts(results_df: pd.DataFrame, index_col: str = "time_label"):
 # ─────────────────────────────────────────────
 
 def _show_charts_daily_agg(results_df: pd.DataFrame):
-    st.markdown('<div class="section-label">Battery SOC Over Time (avg per slot)</div>', unsafe_allow_html=True)
+    st.markdown('')
+    st.markdown('<div style="font-weight:bold; color:gray; text-transform:uppercase;">Battery SOC Over Time (avg per slot)</div>', unsafe_allow_html=True)
     st.line_chart(results_df.set_index("datetime")[["soc_percent"]], color=["#39D353"])
 
-    st.markdown('<div class="section-label">Daily Energy Source Breakdown (kWh)</div>', unsafe_allow_html=True)
+    
+    st.markdown('<div style="font-weight:bold; color:gray; text-transform:uppercase;">Daily Energy Source Breakdown (kWh)</div>', unsafe_allow_html=True)
     daily_energy = (
         results_df.groupby("date")[["battery_load", "grid_load", "grid_to_battery"]]
         .sum()
@@ -310,7 +343,8 @@ def _show_charts_daily_agg(results_df: pd.DataFrame):
 # ─────────────────────────────────────────────
 
 def _show_daily_summary(results_df: pd.DataFrame):
-    st.markdown('<div class="section-label">Daily Summary</div>', unsafe_allow_html=True)
+    st.markdown('')
+    st.markdown('<div style="font-weight:bold; color:gray; text-transform:uppercase;">Daily Summary</div>', unsafe_allow_html=True)
     daily = (
         results_df.groupby("date")
         .agg(
@@ -408,7 +442,7 @@ def _show_net_bill_chart(results_df: pd.DataFrame, period: str = "daily"):
 
 def _tab_daily(cfg: SystemConfig):
     st.caption("3-day forecast starting today.")
-    if not st.button("▶ Run Biweekly Simulation", type="primary", key="run_daily"):
+    if not st.button("▶ Run 3-Day Simulation", type="primary", key="run_daily"):
         return
 
     with st.spinner("Fetching 3-day forecast…"):
@@ -529,18 +563,58 @@ def _tab_annual(cfg: SystemConfig):
 #  Main entry point
 # ─────────────────────────────────────────────
 
+_STYLES = """
+<style>
+@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600&family=Fraunces:ital,opsz,wght@0,9..144,300;0,9..144,600;1,9..144,400&display=swap');
+
+:root {
+    --ink:    #0D1117;
+    --ink2:   #161B22;
+    --ink3:   #21262D;
+    --border: #30363D;
+    --text:   #E6EDF3;
+    --text2:  #8B949E;
+    --teal:   #39D353;
+    --amber:  #E3B341;
+    --blue:   #58A6FF;
+    --orange: #F0883E;
+    --red:    #F85149;
+    --mono:   'JetBrains Mono', monospace;
+    --serif:  'Fraunces', serif;
+}
+
+html, body, [class*="css"] {
+    font-family: var(--mono) !important;
+    background-color: var(--ink) !important;
+    color: var(--text) !important;
+}
+
+.main .block-container {
+    max-width: 1100px;
+    padding: 2rem 2.5rem 4rem;
+}
+</style>
+"""
+
 def show_calculator():
+    st.markdown(_STYLES, unsafe_allow_html=True)
+
     st.markdown("""
-    <div class="solcon-title">SOL<span class="solcon-accent">CON</span> <span style="font-size:1.6rem;color:#8B949E">v5</span></div>
-    <div class="solcon-subtitle">Energy Dispatch Calculator · PV-BESS Simulation</div>
+    <div style="font-family:'Fraunces',serif;font-size:2.6rem;font-weight:600; letter-spacing:-0.02em;color:#E6EDF3;line-height:1;margin-bottom:0.25rem;">
+        <span style="color:#39D353;">Energy Dispatch Calculator</span>
+    </div>
+    <div style="font-family:'JetBrains Mono',monospace;font-size:0.7rem;color:#8B949E;
+                letter-spacing:0.14em;text-transform:uppercase;margin-bottom:2.5rem;">
+        Smart SolCon · Off-Grid PV-BESS Load Controller
+    </div>
     """, unsafe_allow_html=True)
 
-    st.divider()
+    st.markdown('')
 
     col1, col2, col3 = st.columns(3)
 
     with col1:
-        st.markdown('<div class="section-label">Hardware</div>', unsafe_allow_html=True)
+        st.markdown('<div style="font-weight:bold; color:gray; text-transform:uppercase;">Hardware</div>',unsafe_allow_html=True)
         battery_capacity  = st.number_input("Battery Capacity (kWh)",   min_value=0.1, value=16.59, step=0.01)
         soc_floor         = st.number_input("Min SOC Floor (%)",        min_value=0,   max_value=100, value=20)
         pv_capacity       = st.number_input("PV System Capacity (kWp)", min_value=0.1, value=8.0, step=0.1)
@@ -552,7 +626,7 @@ def show_calculator():
         )
 
     with col2:
-        st.markdown('<div class="section-label">Electricity Rates (PHP / kWh)</div>', unsafe_allow_html=True)
+        st.markdown('<div style="font-weight:bold; color:gray; text-transform:uppercase;">Electricity Rates (PHP / kWh)</div>',unsafe_allow_html=True)
         import_rate  = st.number_input("Import / Flat Rate",       min_value=0.0, value=15.68, step=0.01,
                                        help="Meralco standard flat tariff.")
         peak_rate    = st.number_input("TOU Peak Rate",            min_value=0.0, value=17.27, step=0.01,
@@ -563,7 +637,7 @@ def show_calculator():
                                        help="PHP/kWh credited when surplus solar is exported to Meralco.")
 
     with col3:
-        st.markdown('<div class="section-label">Algorithm & Location</div>', unsafe_allow_html=True)
+        st.markdown('<div style="font-weight:bold; color:gray; text-transform:uppercase;">Algorithm & Location</div>', unsafe_allow_html=True)
         algorithm_mode = st.selectbox(
             "Algorithm Mode",
             [
