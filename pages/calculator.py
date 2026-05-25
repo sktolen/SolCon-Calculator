@@ -686,7 +686,7 @@ def show_calculator():
 
     st.markdown("""
     <div style="font-family:'Fraunces',serif;font-size:2.6rem;font-weight:600; letter-spacing:-0.02em;color:#E6EDF3;line-height:1;margin-bottom:0.25rem;">
-        <span style="color:#39D353;">Energy Dispatch Calculator</span>
+        <span style="color:#39D353;">Energy Calculator</span>
     </div>
     <div style="font-family:'JetBrains Mono',monospace;font-size:0.7rem;color:#8B949E;
                 letter-spacing:0.14em;text-transform:uppercase;margin-bottom:2.5rem;">
