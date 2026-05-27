@@ -52,7 +52,7 @@ styles = {
 options = {
     "show_menu": False,
     "show_sidebar": False,
-}
+} 
 
 # ── Track current page in session state so Home is highlighted on first load ──
 if "current_page" not in st.session_state:
