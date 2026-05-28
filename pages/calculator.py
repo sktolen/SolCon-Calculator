@@ -387,7 +387,8 @@ def _show_simulation_insights(results_df: pd.DataFrame, cfg: SystemConfig):
 #  Charts (slot-level — daily & weekly)
 # ─────────────────────────────────────────────
 
-def _show_charts(results_df: pd.DataFrame, basic_df: pd.DataFrame = None, index_col: str = "time_label", soc_resolution: str = "hourly"):
+def _show_charts(results_df: pd.DataFrame, basic_df: pd.DataFrame = None, index_col: str = "time_label", soc_resolution: str = "hourly", grid_interval_hours: int = 3):
+
     def _hourly(df):
         return (
             df.copy()
@@ -400,87 +401,170 @@ def _show_charts(results_df: pd.DataFrame, basic_df: pd.DataFrame = None, index_
                 grid_to_battery=("grid_to_battery", "sum"),
                 net_cost=("net_cost", "sum"),
             )
+            .reset_index()
         )
+
+    def _nhourly(df, n):
+        d = _hourly(df).copy()
+        d["hour"] = pd.to_datetime(d["hour"])
+        d["bucket"] = d["hour"].dt.floor(f"{n}h")
+        d = d.groupby("bucket")["grid_load"].sum().reset_index()
+        d["hour_label"] = d["bucket"].dt.strftime("%b %d %I %p")
+        return d
 
     hourly = _hourly(results_df)
 
     # ── SOC ───────────────────────────────────────────────────────────────
     st.markdown('')
     st.markdown('<div style="font-weight:bold; color:gray; text-transform:uppercase;">Battery State of Charge (hourly avg)</div>', unsafe_allow_html=True)
+
     if basic_df is not None:
-        soc_data = pd.DataFrame({
-            "SOLCON": hourly["soc_percent"],
-            "Basic":  _hourly(basic_df)["soc_percent"],
-        })
-        st.line_chart(soc_data, color=["#39D353", "#58A6FF"])
-        st.caption("Green = SOLCON · Blue = Basic")
+        soc_solcon = hourly[["hour", "soc_percent"]].copy()
+        soc_solcon["algorithm"] = "SOLCON"
+        soc_basic = _hourly(basic_df)[["hour", "soc_percent"]].copy()
+        soc_basic["algorithm"] = "Basic"
+        soc_combined = pd.concat([soc_solcon, soc_basic], ignore_index=True)
+
+        soc_chart = (
+            alt.Chart(soc_combined)
+            .mark_line()
+            .encode(
+                x=alt.X("hour:T", title="Time"),
+                y=alt.Y("soc_percent:Q", title="SOC (%)", scale=alt.Scale(domain=[0, 100])),
+                color=alt.Color("algorithm:N",
+                                scale=alt.Scale(domain=["SOLCON", "Basic"],
+                                                range=["#39D353", "#58A6FF"]),
+                                legend=alt.Legend(title="Algorithm")),
+                tooltip=[
+                    alt.Tooltip("hour:T", title="Time", format="%b %d %I:%M %p"),
+                    alt.Tooltip("algorithm:N", title="Algorithm"),
+                    alt.Tooltip("soc_percent:Q", title="SOC (%)", format=".1f"),
+                ],
+            )
+            .properties(height=300)
+        )
+        st.altair_chart(soc_chart, use_container_width=True)
     else:
-        st.line_chart(hourly[["soc_percent"]], color=["#39D353"])
+        soc_chart = (
+            alt.Chart(hourly)
+            .mark_line(color="#39D353")
+            .encode(
+                x=alt.X("hour:T", title="Time"),
+                y=alt.Y("soc_percent:Q", title="SOC (%)", scale=alt.Scale(domain=[0, 100])),
+                tooltip=[
+                    alt.Tooltip("hour:T", title="Time", format="%b %d %I:%M %p"),
+                    alt.Tooltip("soc_percent:Q", title="SOC (%)", format=".1f"),
+                ],
+            )
+            .properties(height=300)
+        )
+        st.altair_chart(soc_chart, use_container_width=True)
 
     # ── Energy source breakdown ───────────────────────────────────────────
     st.markdown('')
     st.markdown('<div style="font-weight:bold; color:gray; text-transform:uppercase;">Energy Source Breakdown (kWh per hour)</div>', unsafe_allow_html=True)
-    st.area_chart(hourly[["battery_load", "grid_load", "grid_to_battery"]], color=["#58A6FF", "#F85149", "#F0883E"])
 
-    # ── Grid load comparison ──────────────────────────────────────────────
-    if basic_df is not None:
-        st.markdown('')
-        st.markdown('<div style="font-weight:bold; color:gray; text-transform:uppercase;">Grid Draw Comparison (kWh per hour)</div>', unsafe_allow_html=True)
-        grid_data = pd.DataFrame({
-            "Basic":  _hourly(basic_df)["grid_load"],
-            "SolCon": hourly["grid_load"],
-        })
-        st.bar_chart(grid_data, color=["#F85149", "#39D353"], stack=False)
-        st.caption("Green = SOLCON · Red = Basic")
-
-    # ── Net Bill ──────────────────────────────────────────────────────────
-    st.markdown('')
-    st.markdown('<div style="font-weight:bold; color:gray; text-transform:uppercase;">SOLCON — Net Bill per Hour (PHP)</div>', unsafe_allow_html=True)
-    hourly_bill = (
-        results_df.copy()
-        .assign(hour=pd.to_datetime(results_df["time"]).dt.floor("h"))
-        .groupby("hour")
-        .agg(grid_cost=("grid_cost", "sum"), export_credit=("export_credit", "sum"))
+    energy_long = hourly[["hour", "battery_load", "grid_load", "grid_to_battery"]].melt(
+        id_vars="hour", var_name="source", value_name="kwh"
     )
-    hourly_bill["export_credit"] = -hourly_bill["export_credit"]
-    st.bar_chart(hourly_bill[["grid_cost", "export_credit"]], color=["#F85149", "#39D353"])
-    st.caption("Red = grid cost · Green = export credit (negative = earned)")
+    source_labels = {
+        "battery_load": "Battery",
+        "grid_load": "Grid",
+        "grid_to_battery": "Grid → Battery",
+    }
+    energy_long["source"] = energy_long["source"].map(source_labels)
 
+    energy_chart = (
+        alt.Chart(energy_long)
+        .mark_area()
+        .encode(
+            x=alt.X("hour:T", title="Time"),
+            y=alt.Y("kwh:Q", title="kWh", stack="zero"),
+            color=alt.Color("source:N",
+                            scale=alt.Scale(domain=["Battery", "Grid", "Grid → Battery"],
+                                            range=["#58A6FF", "#F85149", "#F0883E"]),
+                            legend=alt.Legend(title="Source")),
+            tooltip=[
+                alt.Tooltip("hour:T", title="Time", format="%b %d %I:%M %p"),
+                alt.Tooltip("source:N", title="Source"),
+                alt.Tooltip("kwh:Q", title="kWh", format=".3f"),
+            ],
+        )
+        .properties(height=300)
+    )
+    st.altair_chart(energy_chart, use_container_width=True)
+
+    # ── Grid draw comparison ──────────────────────────────────────────────
     if basic_df is not None:
         st.markdown('')
-        st.markdown('<div style="font-weight:bold; color:gray; text-transform:uppercase;">Basic — Net Bill per Hour (PHP)</div>', unsafe_allow_html=True)
-        basic_hourly_bill = (
-            basic_df.copy()
-            .assign(hour=pd.to_datetime(basic_df["time"]).dt.floor("h"))
-            .groupby("hour")
-            .agg(grid_cost=("grid_cost", "sum"), export_credit=("export_credit", "sum"))
-        )
-        basic_hourly_bill["export_credit"] = -basic_hourly_bill["export_credit"]
-        st.bar_chart(basic_hourly_bill[["grid_cost", "export_credit"]], color=["#F85149", "#39D353"])
-        st.caption("Red = grid cost · Green = export credit (negative = earned)")
+        st.markdown(f'<div style="font-weight:bold; color:gray; text-transform:uppercase;">Grid Draw Comparison (kWh per {grid_interval_hours}-hour period)</div>', unsafe_allow_html=True)
 
-        # ── Net Bill Comparison — 3-day buckets for daily/weekly ─────────
-        st.markdown('')
-        st.markdown('<div style="font-weight:bold; color:gray; text-transform:uppercase;">Net Bill Comparison — SOLCON vs Basic (PHP)</div>', unsafe_allow_html=True)
+        grid_solcon = _nhourly(results_df, grid_interval_hours)[["hour_label", "grid_load"]].copy()
+        grid_solcon["algorithm"] = "SOLCON"
+        grid_basic = _nhourly(basic_df, grid_interval_hours)[["hour_label", "grid_load"]].copy()
+        grid_basic["algorithm"] = "Basic"
+        grid_combined = pd.concat([grid_solcon, grid_basic], ignore_index=True)
 
-        def _bucket_3day(df):
-            d = df.copy()
-            d["dt"] = pd.to_datetime(d["time"])
-            d["day"] = d["dt"].dt.normalize()
-            min_day = d["day"].min()
-            d["bucket_n"] = ((d["day"] - min_day).dt.days // 3)
-            d["bucket"] = d["bucket_n"].apply(
-                lambda n: (min_day + pd.Timedelta(days=n * 3)).strftime("%b %d")
+        grid_chart = (
+            alt.Chart(grid_combined)
+            .mark_bar()
+            .encode(
+                x=alt.X("hour_label:O", title="Time", sort=None),
+                y=alt.Y("grid_load:Q", title="kWh"),
+                color=alt.Color("algorithm:N",
+                                scale=alt.Scale(domain=["SOLCON", "Basic"],
+                                                range=["#39D353", "#58A6FF"]),
+                                legend=alt.Legend(title="Algorithm")),
+                xOffset="algorithm:N",
+                tooltip=[
+                    alt.Tooltip("hour_label:O", title="Time"),
+                    alt.Tooltip("algorithm:N", title="Algorithm"),
+                    alt.Tooltip("grid_load:Q", title="kWh", format=".3f"),
+                ],
             )
-            return d.groupby("bucket")["net_cost"].sum()
+            .properties(height=300)
+        )
+        st.altair_chart(grid_chart, use_container_width=True)
 
-        net_compare = pd.DataFrame({
-            "SOLCON": _bucket_3day(results_df),
-            "Basic":  _bucket_3day(basic_df),
-        })
-        st.bar_chart(net_compare, color=["#39D353", "#58A6FF"], stack=False)
-        st.caption("Green = SOLCON · Blue = Basic — lower is better")
+    # ── Net Bill Comparison — daily ───────────────────────────────────────
+    if basic_df is not None:
+        st.markdown('')
+        st.markdown('<div style="font-weight:bold; color:gray; text-transform:uppercase;">Net Bill Comparison — SOLCON vs Basic (PHP per day)</div>', unsafe_allow_html=True)
 
+        def _daily_net(df, label):
+            d = df.copy()
+            d["period"] = pd.to_datetime(d["time"]).dt.strftime("%b %d")
+            result = d.groupby("period")["net_cost"].sum().reset_index()
+            result["algorithm"] = label
+            result = result.rename(columns={"net_cost": "net"})
+            return result
+
+        combined = pd.concat([
+            _daily_net(results_df, "SOLCON"),
+            _daily_net(basic_df, "Basic"),
+        ], ignore_index=True)
+
+        net_chart = (
+            alt.Chart(combined)
+            .mark_bar()
+            .encode(
+                x=alt.X("period:O", title="Date", sort=None),
+                y=alt.Y("net:Q", title="Net Bill (PHP)",
+                        axis=alt.Axis(labelExpr="'PHP ' + datum.value")),
+                color=alt.Color("algorithm:N",
+                                scale=alt.Scale(domain=["SOLCON", "Basic"],
+                                                range=["#39D353", "#58A6FF"]),
+                                legend=alt.Legend(title="Algorithm")),
+                xOffset="algorithm:N",
+                tooltip=[
+                    alt.Tooltip("period:O", title="Date"),
+                    alt.Tooltip("algorithm:N", title="Algorithm"),
+                    alt.Tooltip("net:Q", title="Net Bill (PHP)", format=",.2f"),
+                ],
+            )
+            .properties(height=350)
+        )
+        st.altair_chart(net_chart, use_container_width=True)
 
 # ─────────────────────────────────────────────
 #  Charts (day-aggregated — monthly)
@@ -495,7 +579,6 @@ def _show_charts_daily_agg(results_df: pd.DataFrame, basic_df: pd.DataFrame = No
             "Basic":  basic_df.set_index("datetime")["soc_percent"],
         })
         st.line_chart(soc_data, color=["#39D353", "#58A6FF"])
-        st.caption("Green = SOLCON · Blue = Basic")
     else:
         st.line_chart(results_df.set_index("datetime")[["soc_percent"]], color=["#39D353"])
 
@@ -510,8 +593,7 @@ def _show_charts_daily_agg(results_df: pd.DataFrame, basic_df: pd.DataFrame = No
             "SOLCON": results_df.groupby("date")["grid_load"].sum(),
             "Basic":  basic_df.groupby("date")["grid_load"].sum(),
         })
-        st.bar_chart(grid_data, color=["#39D353", "#F85149"], stack=False)
-        st.caption("Green = SOLCON · Red = Basic")
+        st.bar_chart(grid_data, color=["#39D353", "#58A6FF"], stack=False)
 
     _show_net_bill_chart(results_df, period="daily", basic_df=basic_df)
 
@@ -691,7 +773,7 @@ def _tab_daily(cfg: SystemConfig):
 
     _show_comparison_metrics(results_df, basic_df)
     _show_simulation_insights(results_df, cfg)
-    _show_charts(results_df, basic_df=basic_df)   # ← add basic_df
+    _show_charts(results_df, basic_df=basic_df, grid_interval_hours=3) # ← add basic_df
     _show_daily_summary(results_df)
 
     with st.expander("Full Slot-by-Slot Results"):
@@ -723,7 +805,7 @@ def _tab_weekly(cfg: SystemConfig):
 
     _show_comparison_metrics(results_df, basic_df)
     _show_simulation_insights(results_df, cfg)
-    _show_charts(results_df, basic_df=basic_df)
+    _show_charts(results_df, basic_df=basic_df, grid_interval_hours=6)
     _show_daily_summary(results_df)
 
     with st.expander("Full Slot-by-Slot Results"):
