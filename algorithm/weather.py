@@ -168,12 +168,9 @@ def get_weather_annual(latitude, longitude):
     return get_weather_historical(latitude, longitude, start_date=start_date, end_date=end_date)
 
 
-def calculate_pv_kw(irradiance, cfg):
-    return (
-        cfg.pv_capacity
-        * (irradiance / 1000)
-        * cfg.system_efficiency
-    )
+def calculate_pv_kw(irradiance, cfg, cloud_cover=0):
+    cloud_factor = 1.0 - (cloud_cover / 100) * 0.75
+    return cfg.pv_capacity * (irradiance / 1000) * cloud_factor
 
 
 def prepare_weather_data(forecast_df, cfg):
@@ -194,8 +191,9 @@ def prepare_weather_data(forecast_df, cfg):
             "temperature": "mean",
         })
     elif median_minutes <= 60:
-        # Hourly data → resample to 30-min with interpolation
-        forecast_df = forecast_df.resample("30min").interpolate(method="linear")
+        # Hourly data → forward-fill to 30-min slots
+        # interpolation creates phantom irradiance at sunrise/sunset boundaries
+        forecast_df = forecast_df.resample("30min").ffill()
     
     forecast_df = forecast_df.reset_index()
 
@@ -205,8 +203,10 @@ def prepare_weather_data(forecast_df, cfg):
     forecast_df["precipitation"] = forecast_df["precipitation"].fillna(0)
     forecast_df["temperature"] = forecast_df["temperature"].ffill().bfill()
 
-    forecast_df["pv_kw"] = forecast_df["shortwave_radiation"].apply(
-        lambda x: calculate_pv_kw(x, cfg)
+    # Apply cloud cover derating to PV output
+    forecast_df["pv_kw"] = forecast_df.apply(
+        lambda row: calculate_pv_kw(row["shortwave_radiation"], cfg, row["cloud_cover"]),
+        axis=1,
     )
 
     forecast_df["date"] = forecast_df["time"].dt.strftime("%Y-%m-%d")
