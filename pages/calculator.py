@@ -592,7 +592,7 @@ def _tab_monthly(cfg: SystemConfig):
 
     if not st.button("▶ Run Monthly Simulation", type="primary", key="run_monthly"):
         return
-
+    
     with st.spinner(f"Fetching data for {datetime.date(year, month, 1).strftime('%B %Y')}…"):
         raw_df = get_weather_monthly(cfg.latitude, cfg.longitude, month=month, year=year)
 
@@ -613,6 +613,17 @@ def _tab_monthly(cfg: SystemConfig):
         )
         results_df = _run_simulation(raw_df, monthly_cfg)
         basic_df   = _run_basic_simulation(raw_df, monthly_cfg)
+    
+    # Add this temporarily to debug:
+    prepared_check = prepare_weather_data(raw_df, monthly_cfg)
+    daily_check = aggregate_daily_pv(prepared_check)
+    st.write(f"Slots fetched: {len(prepared_check)} | Days: {len(daily_check)}")
+    st.write(f"Avg daily PV kWh: {sum(daily_check.values())/len(daily_check):.2f}")
+
+    # Check what dates were actually returned
+    st.write(f"Date range in data: {raw_df['time'].iloc[0]} → {raw_df['time'].iloc[-1]}")
+    st.write(f"Total rows: {len(raw_df)}")
+    st.write(f"Avg shortwave_radiation: {raw_df['shortwave_radiation'].mean():.1f} W/m²")
 
     st.divider()
     st.subheader("Summary")
@@ -727,7 +738,7 @@ def show_calculator():
         soc_max           = st.number_input("Maximum SOC (%)",          min_value=0,   max_value=100, value=100)
         system_efficiency = st.slider(
             "System Performance Ratio",
-            min_value=0.50, max_value=1.00, value=0.80, step=0.01,
+            min_value=0.50, max_value=1.00, value=0.96, step=0.01,
             help="Accounts for heat, wiring, and inverter losses. 0.80 = 80% efficient.",
         )
 
