@@ -8,16 +8,13 @@ import pandas as pd
 #
 #  Logic (from the report):
 #    - Targets a flat average load every 30-min slot, regardless of PV/SOC/time
-#    - flat_load = daily_avg_kwh / 48 slots
+#    - flat_load = 27.2 kWh/day ÷ 48 slots = 0.5667 kWh/slot (LOAD_FULL)
 #    - PV serves load first
 #    - Battery covers remaining load (down to soc_floor)
 #    - Grid covers any remaining shortfall
-#    - Surplus PV charges battery, then exports
+#    - Surplus PV charges battery (with efficiency), then exports
 #    - Never charges battery from grid
-#
-#  Output columns are a strict superset of what _show_metrics, _show_charts,
-#  _show_daily_summary, etc. expect — so basic results can be passed to any
-#  existing display function unchanged.
+#    - Bills at flat import rate (no TOU awareness)
 # ─────────────────────────────────────────────────────────────────────────────
 
 SLOT_HOURS = 0.5   # 30-min slots throughout
@@ -34,13 +31,8 @@ def simulate_basic(
     Grid absorbs whatever the battery cannot cover once it hits soc_floor.
     """
 
-    # Flat load per slot = average daily consumption / 48 slots.
-    # We derive "average daily consumption" from the system's full-load tiers,
-    # which matches the report's 27.2 kWh / 48 = 0.5667 kWh/slot baseline.
-    # Using cfg load tiers keeps it consistent with whatever the user configured.
-    # cfg load tier fields are already in kWh/slot (not kW), so sum directly
-    flat_load_per_slot = cfg.critical_load + cfg.essential_load + cfg.noncritical_load
-    # = 0.200 + 0.350 + 0.250 = 0.800 kWh/slot = 38.4 kWh/day
+    # Flat load per slot — reference LOAD_FULL = 27.2 kWh/day ÷ 48 = 0.5667 kWh/slot
+    flat_load_per_slot = 27.2 / 48
 
     soc = cfg.initial_soc
     results = []
@@ -49,12 +41,11 @@ def simulate_basic(
     for i, row in pv_data.iterrows():
         current_date = row["date"]
         slot = row["slot"]
-        pv_kw = row["pv_kw"]           # already efficiency-adjusted by prepare_weather_data
+        pv_kw = row["pv_kw"]
 
         day_index = dates.index(current_date) if current_date in dates else 0
         weekday = (start_weekday + day_index) % 7
 
-        # pv_kw is already in post-efficiency kW; convert to kWh for this slot
         pv_kwh = pv_kw * SLOT_HOURS
         load_kwh = flat_load_per_slot
 
@@ -70,15 +61,21 @@ def simulate_basic(
         remaining_load -= battery_to_load
 
         # ── 3. Grid serves anything left ──────────────────────────────────
-        grid_to_load = remaining_load   # may be > 0 when battery is at floor
+        grid_to_load = remaining_load
 
-        # ── 4. Surplus PV charges battery ────────────────────────────────
+        # ── 4. Surplus PV charges battery (apply round-trip efficiency) ──
         battery_headroom = max(0.0, (cfg.soc_max - soc) * cfg.battery_capacity)
-        pv_to_battery = min(remaining_pv, battery_headroom)
+        pv_to_battery = min(remaining_pv * cfg.system_efficiency, battery_headroom)
         soc += pv_to_battery / cfg.battery_capacity
 
+        # Raw PV consumed by battery (before efficiency loss)
+        pv_used_for_battery = (
+            pv_to_battery / cfg.system_efficiency
+            if cfg.system_efficiency > 0 else 0
+        )
+
         # ── 5. Remaining PV is exported ───────────────────────────────────
-        export_kwh = max(0.0, remaining_pv - pv_to_battery)
+        export_kwh = max(0.0, remaining_pv - pv_used_for_battery)
 
         # ── 6. No grid charging (basic never charges from grid) ───────────
         grid_to_battery = 0.0
@@ -92,34 +89,26 @@ def simulate_basic(
         net_cost = grid_cost - export_credit
 
         results.append({
-            # ── identity / time ──────────────────────────────────────────
             "time":             row["time"],
             "date":             current_date,
             "slot":             slot,
             "weekday":          weekday,
-
-            # ── PV ───────────────────────────────────────────────────────
             "pv_kw":            pv_kw,
             "pv_kwh":           pv_kwh,
-            "pv_state":         "BASIC",     # sentinel; not used by display fns
+            "pv_state":         "BASIC",
             "is_peak":          False,
             "forecast_tier":    "N/A",
             "outlook":          "N/A",
-
-            # ── demand (decision layer — same field names as solcon) ──────
             "load_demand":      load_kwh,
             "battery_demand":   battery_to_load,
             "grid_demand":      grid_to_load,
             "grid_charge":      0.0,
-
-            # ── actual energy flow (what _show_metrics / charts read) ─────
             "pv_to_load":       pv_to_load,
-            "battery_load":     battery_to_load,   # ← _show_metrics key
-            "grid_load":        grid_to_load,       # ← _show_metrics key
+            "battery_load":     battery_to_load,
+            "grid_load":        grid_to_load,
             "pv_to_battery":    pv_to_battery,
-            "grid_to_battery":  grid_to_battery,    # ← _show_metrics key
-
-            # ── battery & financial ───────────────────────────────────────
+            "grid_to_battery":  grid_to_battery,
+            "ge":               0.0,
             "soc":              soc,
             "rate":             cfg.import_rate,
             "export_kwh":       export_kwh,
