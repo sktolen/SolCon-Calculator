@@ -70,11 +70,14 @@ def check_peak_offpeak(slot, weekday):
  
 # Check forecast tier based on daily kWh
 def check_forecast_tier(day_kwh, cfg):
-    if day_kwh > 20.0:   
+    high_threshold   = cfg.pv_capacity * 4.5 * cfg.system_efficiency
+    medium_threshold = cfg.pv_capacity * 2.0 * cfg.system_efficiency
+
+    if day_kwh >= high_threshold:
         return "HIGH"
-    elif day_kwh >= 10.0: 
+    elif day_kwh >= medium_threshold:
         return "MEDIUM"
-    else:                 
+    else:
         return "LOW"
 
 # Check outlook for the next ays based on forecast tiers
@@ -114,7 +117,7 @@ def check_outlook(current_date, daily_kwh, cfg):
 # Battery load -> how much energy to draw from the battery
 # Grid load -> how much energy to draw from the grid
 # Grid charge -> how much energy to use for charging the battery (can be 0 if not charging)
-def determine_action(pv_state, is_peak, soc, forecast_tier, tomorrow_kwh, outlook, cfg):
+def determine_action(pv_state, is_peak, soc, forecast_tier, outlook, cfg):
     C = cfg.critical_load
     E = cfg.essential_load
     N = cfg.noncritical_load
@@ -159,7 +162,7 @@ def determine_action(pv_state, is_peak, soc, forecast_tier, tomorrow_kwh, outloo
         # NIGHT + OFFPEAK
         # if off-peak hours, run critical + essential from grid to save battery for peak hours, unless SOC is very high in which case run from battery
         # also consider forecast and outlook - if forecast is bad and SOC is not high, charge from grid to prepare for next days
-        target_soc = should_grid_charge(outlook, tomorrow_kwh, soc, cfg)
+        target_soc = should_grid_charge(outlook, forecast_tier, soc, pv_state, cfg)
         if target_soc is not None:
             gc = calculate_grid_charge(target_soc, soc, cfg)
         else:
@@ -201,15 +204,28 @@ def determine_action(pv_state, is_peak, soc, forecast_tier, tomorrow_kwh, outloo
     return 0.0, C + E, 0.0
 
 
-def should_grid_charge(outlook, t_kwh, soc, cfg):
+def should_grid_charge(outlook, forecast_tier, soc, pv_state, cfg):
+    if pv_state in ("CHARGE", "SUNNY"):
+        return None
+
     if outlook == "SUNNY_WEEK":
         return None
-    target = 0.75 if outlook == "MIXED_WEEK" else 0.85
-    if outlook == "MIXED_WEEK" and t_kwh >= 10.0:
-        return None
-    if soc >= target - 0.10:
-        return None
-    return target
+
+    if outlook == "MIXED_WEEK":
+        if forecast_tier != "LOW":
+            return None
+        target_soc = 0.75
+        if soc >= target_soc - 0.10:
+            return None
+        return target_soc
+
+    if outlook == "CLOUDY_WEEK":
+        target_soc = 0.85
+        if soc >= target_soc - 0.10:
+            return None
+        return target_soc
+
+    return None
 
 
 # Calculate how much grid energy to use for charging
@@ -306,7 +322,6 @@ def simulate_solcon(pv_data, daily_kwh, start_weekday, cfg):
             is_peak=is_peak,
             soc=soc,
             forecast_tier=forecast_tier,
-            tomorrow_kwh=tomorrow_kwh,
             outlook=outlook,
             cfg=cfg,
         )
