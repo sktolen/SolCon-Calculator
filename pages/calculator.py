@@ -416,7 +416,7 @@ def _show_charts(results_df: pd.DataFrame, basic_df: pd.DataFrame = None, index_
 
     # ── SOC ───────────────────────────────────────────────────────────────
     st.markdown('')
-    st.markdown('<div style="font-weight:bold; color:gray; text-transform:uppercase;">Battery State of Charge (hourly avg)</div>', unsafe_allow_html=True)
+    st.markdown('<div style="font-weight:bold; color:gray; text-transform:uppercase;">Battery State of Charge (%)</div>', unsafe_allow_html=True)
 
     if basic_df is not None:
         soc_solcon = hourly[["hour", "soc_percent"]].copy()
@@ -462,7 +462,7 @@ def _show_charts(results_df: pd.DataFrame, basic_df: pd.DataFrame = None, index_
 
     # ── Energy source breakdown ───────────────────────────────────────────
     st.markdown('')
-    st.markdown('<div style="font-weight:bold; color:gray; text-transform:uppercase;">Energy Source Breakdown (kWh per hour)</div>', unsafe_allow_html=True)
+    st.markdown('<div style="font-weight:bold; color:gray; text-transform:uppercase;">Energy Source Breakdown (kWh)</div>', unsafe_allow_html=True)
 
     energy_long = hourly[["hour", "battery_load", "grid_load", "grid_to_battery"]].melt(
         id_vars="hour", var_name="source", value_name="kwh"
@@ -497,7 +497,7 @@ def _show_charts(results_df: pd.DataFrame, basic_df: pd.DataFrame = None, index_
     # ── Grid draw comparison ──────────────────────────────────────────────
     if basic_df is not None:
         st.markdown('')
-        st.markdown(f'<div style="font-weight:bold; color:gray; text-transform:uppercase;">Grid Draw Comparison (kWh per {grid_interval_hours}-hour period)</div>', unsafe_allow_html=True)
+        st.markdown(f'<div style="font-weight:bold; color:gray; text-transform:uppercase;">Grid Draw Comparison (kWh)</div>', unsafe_allow_html=True)
 
         grid_solcon = _nhourly(results_df, grid_interval_hours)[["hour_label", "grid_load"]].copy()
         grid_solcon["algorithm"] = "SOLCON"
@@ -529,7 +529,7 @@ def _show_charts(results_df: pd.DataFrame, basic_df: pd.DataFrame = None, index_
     # ── Net Bill Comparison — daily ───────────────────────────────────────
     if basic_df is not None:
         st.markdown('')
-        st.markdown('<div style="font-weight:bold; color:gray; text-transform:uppercase;">Net Bill Comparison — SOLCON vs Basic (PHP per day)</div>', unsafe_allow_html=True)
+        st.markdown('<div style="font-weight:bold; color:gray; text-transform:uppercase;">Net Bill Comparison (PhP)</div>', unsafe_allow_html=True)
 
         def _daily_net(df, label):
             d = df.copy()
@@ -591,7 +591,7 @@ def _show_charts_daily_agg(results_df: pd.DataFrame, basic_df: pd.DataFrame = No
 
     # ── SOC ───────────────────────────────────────────────────────────────
     st.markdown('')
-    st.markdown('<div style="font-weight:bold; color:gray; text-transform:uppercase;">Battery SOC Over Time (daily avg)</div>', unsafe_allow_html=True)
+    st.markdown('<div style="font-weight:bold; color:gray; text-transform:uppercase;">Battery SOC Over Time (%)</div>', unsafe_allow_html=True)
 
     if basic_df is not None:
         soc_solcon = daily[["date", "soc_percent"]].copy()
@@ -756,17 +756,48 @@ def _show_monthly_breakdown(results_df: pd.DataFrame, basic_df: pd.DataFrame = N
         .reset_index()
     )
 
-    st.markdown('<div class="section-label">Monthly Breakdown</div>', unsafe_allow_html=True)
+    st.markdown('<div style="font-weight:bold; color:gray; text-transform:uppercase;">Monthly Breakdown</div>', unsafe_allow_html=True)
     st.dataframe(monthly, use_container_width=True)
 
     _show_net_bill_chart(results_df, period="monthly", basic_df=basic_df)
 
-    st.markdown('<div class="section-label">Monthly Energy Sources (kWh)</div>', unsafe_allow_html=True)
-    st.area_chart(
-        monthly.set_index("month")[["battery_load", "grid_load", "grid_to_battery"]],
-        color=["#58A6FF", "#F85149", "#F0883E"],
-    )
+    # ── Monthly Energy Sources ────────────────────────────────────────────
+    st.markdown('')
+    st.markdown('<div style="font-weight:bold; color:gray; text-transform:uppercase;">Monthly Energy Sources (kWh)</div>', unsafe_allow_html=True)
 
+    energy_long = monthly[["month", "battery_load", "grid_load", "grid_to_battery"]].melt(
+        id_vars="month", var_name="source", value_name="kwh"
+    )
+    source_labels = {
+        "battery_load": "Battery",
+        "grid_load": "Grid",
+        "grid_to_battery": "Grid → Battery",
+    }
+    energy_long["source"] = energy_long["source"].map(source_labels)
+
+    energy_chart = (
+        alt.Chart(energy_long)
+        .mark_area()
+        .encode(
+            x=alt.X("month:O", title="Month", sort=None),
+            y=alt.Y("kwh:Q", title="kWh", stack="zero"),
+            color=alt.Color(
+                "source:N",
+                scale=alt.Scale(
+                    domain=["Battery", "Grid", "Grid → Battery"],
+                    range=["#58A6FF", "#F85149", "#F0883E"],
+                ),
+                legend=alt.Legend(title="Source"),
+            ),
+            tooltip=[
+                alt.Tooltip("month:O", title="Month"),
+                alt.Tooltip("source:N", title="Source"),
+                alt.Tooltip("kwh:Q", title="kWh", format=".2f"),
+            ],
+        )
+        .properties(height=300)
+    )
+    st.altair_chart(energy_chart, use_container_width=True)
 
 # ─────────────────────────────────────────────
 #  Net bill chart (shared)
@@ -779,10 +810,10 @@ def _show_net_bill_chart(results_df: pd.DataFrame, period: str = "daily", basic_
 
     if period == "daily":
         df["period"] = df["datetime"].dt.strftime("%b %d")
-        title = "Net Bill Comparison — SOLCON vs Basic (PHP per day)"
+        title = "Net Bill Comparison (PhP)"
     else:
         df["period"] = df["datetime"].dt.to_period("M").astype(str)
-        title = "Net Bill Comparison — SOLCON vs Basic (PHP per month)"
+        title = "Net Bill Comparison (PhP)"
 
     solcon_bill = (
         df.groupby("period")
@@ -791,7 +822,7 @@ def _show_net_bill_chart(results_df: pd.DataFrame, period: str = "daily", basic_
     )
     solcon_bill["net"] = (solcon_bill["grid_cost"] - solcon_bill["export_credit"]).round(2)
 
-    st.markdown(f'<div class="section-label">{title}</div>', unsafe_allow_html=True)
+    st.markdown(f'<div style="font-weight:bold; color:gray; text-transform:uppercase;">{title}</div>', unsafe_allow_html=True)
 
     if basic_df is not None:
         b = basic_df.copy()
@@ -976,9 +1007,7 @@ def _tab_monthly(cfg: SystemConfig):
 
 def _tab_annual(cfg: SystemConfig):
     prev_year = datetime.date.today().year - 1
-    st.caption(
-        f"Historical data for the full year {prev_year} (Jan 1 – Dec 31)."
-    )
+    st.caption(f"Historical data for the full year {prev_year} (Jan 1 – Dec 31).")
     if not st.button("▶ Run Annual Simulation", type="primary", key="run_annual"):
         return
 
@@ -996,12 +1025,36 @@ def _tab_annual(cfg: SystemConfig):
     _show_simulation_insights(results_df, cfg)
     _show_monthly_breakdown(results_df, basic_df=basic_df)
 
+    # ── Daily Average SOC Over the Year ──────────────────────────────────
     st.markdown('<div class="section-label">Daily Average SOC Over the Year</div>', unsafe_allow_html=True)
-    soc_annual = pd.DataFrame({
-        "SOLCON": results_df.groupby("date")["soc_percent"].mean(),
-        "Basic":  basic_df.groupby("date")["soc_percent"].mean(),
-    })
-    st.line_chart(soc_annual, color=["#39D353", "#58A6FF"])
+
+    soc_solcon = results_df.groupby("date")["soc_percent"].mean().reset_index()
+    soc_solcon["algorithm"] = "SOLCON"
+    soc_basic  = basic_df.groupby("date")["soc_percent"].mean().reset_index()
+    soc_basic["algorithm"] = "Basic"
+    soc_annual = pd.concat([soc_solcon, soc_basic], ignore_index=True)
+    soc_annual["date"] = pd.to_datetime(soc_annual["date"])
+
+    soc_chart = (
+        alt.Chart(soc_annual)
+        .mark_line()
+        .encode(
+            x=alt.X("date:T", title="Date"),
+            y=alt.Y("soc_percent:Q", title="SOC (%)", scale=alt.Scale(domain=[0, 100])),
+            color=alt.Color(
+                "algorithm:N",
+                scale=alt.Scale(domain=["SOLCON", "Basic"], range=["#39D353", "#58A6FF"]),
+                legend=alt.Legend(title="Algorithm"),
+            ),
+            tooltip=[
+                alt.Tooltip("date:T", title="Date", format="%b %d"),
+                alt.Tooltip("algorithm:N", title="Algorithm"),
+                alt.Tooltip("soc_percent:Q", title="SOC (%)", format=".1f"),
+            ],
+        )
+        .properties(height=300)
+    )
+    st.altair_chart(soc_chart, use_container_width=True)
 
     _show_daily_summary(results_df)
 
@@ -1009,7 +1062,6 @@ def _tab_annual(cfg: SystemConfig):
         display = results_df.copy()
         display["soc"] = (display["soc"] * 100).round(1).astype(str) + "%"
         st.dataframe(display, use_container_width=True)
-
 
 # ─────────────────────────────────────────────
 #  Main entry point
