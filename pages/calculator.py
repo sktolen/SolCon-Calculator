@@ -571,30 +571,138 @@ def _show_charts(results_df: pd.DataFrame, basic_df: pd.DataFrame = None, index_
 # ─────────────────────────────────────────────
 
 def _show_charts_daily_agg(results_df: pd.DataFrame, basic_df: pd.DataFrame = None):
+
+    def _daily(df):
+        return (
+            df.copy()
+            .assign(date=pd.to_datetime(df["date"]))
+            .groupby("date")
+            .agg(
+                soc_percent=("soc_percent", "mean"),
+                battery_load=("battery_load", "sum"),
+                grid_load=("grid_load", "sum"),
+                grid_to_battery=("grid_to_battery", "sum"),
+                net_cost=("net_cost", "sum"),
+            )
+            .reset_index()
+        )
+
+    daily = _daily(results_df)
+
+    # ── SOC ───────────────────────────────────────────────────────────────
     st.markdown('')
-    st.markdown('<div style="font-weight:bold; color:gray; text-transform:uppercase;">Battery SOC Over Time (avg per slot)</div>', unsafe_allow_html=True)
+    st.markdown('<div style="font-weight:bold; color:gray; text-transform:uppercase;">Battery SOC Over Time (daily avg)</div>', unsafe_allow_html=True)
+
     if basic_df is not None:
-        soc_data = pd.DataFrame({
-            "SOLCON": results_df.set_index("datetime")["soc_percent"],
-            "Basic":  basic_df.set_index("datetime")["soc_percent"],
-        })
-        st.line_chart(soc_data, color=["#39D353", "#58A6FF"])
+        soc_solcon = daily[["date", "soc_percent"]].copy()
+        soc_solcon["algorithm"] = "SOLCON"
+        soc_basic = _daily(basic_df)[["date", "soc_percent"]].copy()
+        soc_basic["algorithm"] = "Basic"
+        soc_combined = pd.concat([soc_solcon, soc_basic], ignore_index=True)
+
+        soc_chart = (
+            alt.Chart(soc_combined)
+            .mark_line()
+            .encode(
+                x=alt.X("date:T", title="Date"),
+                y=alt.Y("soc_percent:Q", title="SOC (%)", scale=alt.Scale(domain=[0, 100])),
+                color=alt.Color("algorithm:N",
+                                scale=alt.Scale(domain=["SOLCON", "Basic"],
+                                                range=["#39D353", "#58A6FF"]),
+                                legend=alt.Legend(title="Algorithm")),
+                tooltip=[
+                    alt.Tooltip("date:T", title="Date", format="%b %d"),
+                    alt.Tooltip("algorithm:N", title="Algorithm"),
+                    alt.Tooltip("soc_percent:Q", title="SOC (%)", format=".1f"),
+                ],
+            )
+            .properties(height=300)
+        )
+        st.altair_chart(soc_chart, use_container_width=True)
     else:
-        st.line_chart(results_df.set_index("datetime")[["soc_percent"]], color=["#39D353"])
+        soc_chart = (
+            alt.Chart(daily)
+            .mark_line(color="#39D353")
+            .encode(
+                x=alt.X("date:T", title="Date"),
+                y=alt.Y("soc_percent:Q", title="SOC (%)", scale=alt.Scale(domain=[0, 100])),
+                tooltip=[
+                    alt.Tooltip("date:T", title="Date", format="%b %d"),
+                    alt.Tooltip("soc_percent:Q", title="SOC (%)", format=".1f"),
+                ],
+            )
+            .properties(height=300)
+        )
+        st.altair_chart(soc_chart, use_container_width=True)
 
+    # ── Energy source breakdown ───────────────────────────────────────────
+    st.markdown('')
     st.markdown('<div style="font-weight:bold; color:gray; text-transform:uppercase;">Daily Energy Source Breakdown (kWh)</div>', unsafe_allow_html=True)
-    daily_energy = results_df.groupby("date")[["battery_load", "grid_load", "grid_to_battery"]].sum()
-    st.area_chart(daily_energy, color=["#58A6FF", "#F85149", "#F0883E"])
 
+    energy_long = daily[["date", "battery_load", "grid_load", "grid_to_battery"]].melt(
+        id_vars="date", var_name="source", value_name="kwh"
+    )
+    source_labels = {
+        "battery_load": "Battery",
+        "grid_load": "Grid",
+        "grid_to_battery": "Grid → Battery",
+    }
+    energy_long["source"] = energy_long["source"].map(source_labels)
+
+    energy_chart = (
+        alt.Chart(energy_long)
+        .mark_area()
+        .encode(
+            x=alt.X("date:T", title="Date"),
+            y=alt.Y("kwh:Q", title="kWh", stack="zero"),
+            color=alt.Color("source:N",
+                            scale=alt.Scale(domain=["Battery", "Grid", "Grid → Battery"],
+                                            range=["#58A6FF", "#F85149", "#F0883E"]),
+                            legend=alt.Legend(title="Source")),
+            tooltip=[
+                alt.Tooltip("date:T", title="Date", format="%b %d"),
+                alt.Tooltip("source:N", title="Source"),
+                alt.Tooltip("kwh:Q", title="kWh", format=".2f"),
+            ],
+        )
+        .properties(height=300)
+    )
+    st.altair_chart(energy_chart, use_container_width=True)
+
+    # ── Grid draw comparison ──────────────────────────────────────────────
     if basic_df is not None:
         st.markdown('')
         st.markdown('<div style="font-weight:bold; color:gray; text-transform:uppercase;">Daily Grid Draw Comparison (kWh)</div>', unsafe_allow_html=True)
-        grid_data = pd.DataFrame({
-            "SOLCON": results_df.groupby("date")["grid_load"].sum(),
-            "Basic":  basic_df.groupby("date")["grid_load"].sum(),
-        })
-        st.bar_chart(grid_data, color=["#39D353", "#58A6FF"], stack=False)
 
+        grid_solcon = daily[["date", "grid_load"]].copy()
+        grid_solcon["algorithm"] = "SOLCON"
+        grid_basic = _daily(basic_df)[["date", "grid_load"]].copy()
+        grid_basic["algorithm"] = "Basic"
+        grid_combined = pd.concat([grid_solcon, grid_basic], ignore_index=True)
+        grid_combined["date_label"] = pd.to_datetime(grid_combined["date"]).dt.strftime("%b %d")
+
+        grid_chart = (
+            alt.Chart(grid_combined)
+            .mark_bar()
+            .encode(
+                x=alt.X("date_label:O", title="Date", sort=None),
+                y=alt.Y("grid_load:Q", title="kWh"),
+                color=alt.Color("algorithm:N",
+                                scale=alt.Scale(domain=["SOLCON", "Basic"],
+                                                range=["#39D353", "#58A6FF"]),
+                                legend=alt.Legend(title="Algorithm")),
+                xOffset="algorithm:N",
+                tooltip=[
+                    alt.Tooltip("date_label:O", title="Date"),
+                    alt.Tooltip("algorithm:N", title="Algorithm"),
+                    alt.Tooltip("grid_load:Q", title="kWh", format=".2f"),
+                ],
+            )
+            .properties(height=300)
+        )
+        st.altair_chart(grid_chart, use_container_width=True)
+
+    # ── Net Bill Comparison ───────────────────────────────────────────────
     _show_net_bill_chart(results_df, period="daily", basic_df=basic_df)
 
 # ─────────────────────────────────────────────
@@ -852,17 +960,6 @@ def _tab_monthly(cfg: SystemConfig):
         )
         results_df = _run_simulation(raw_df, monthly_cfg)
         basic_df   = _run_basic_simulation(raw_df, monthly_cfg)
-    
-    # Add this temporarily to debug:
-    prepared_check = prepare_weather_data(raw_df, monthly_cfg)
-    daily_check = aggregate_daily_pv(prepared_check)
-    st.write(f"Slots fetched: {len(prepared_check)} | Days: {len(daily_check)}")
-    st.write(f"Avg daily PV kWh: {sum(daily_check.values())/len(daily_check):.2f}")
-
-    # Check what dates were actually returned
-    st.write(f"Date range in data: {raw_df['time'].iloc[0]} → {raw_df['time'].iloc[-1]}")
-    st.write(f"Total rows: {len(raw_df)}")
-    st.write(f"Avg shortwave_radiation: {raw_df['shortwave_radiation'].mean():.1f} W/m²")
 
     st.divider()
     st.subheader("Summary")
