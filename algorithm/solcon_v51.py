@@ -36,6 +36,7 @@ class SystemConfig:
     noncritical_load: float = 0.250
     max_grid_charge: float = 2.5
     initial_soc: float = 0.50
+    daily_load_kwh: float = 27.2
 
 
 # Check PV state based on current generation and PV capacity
