@@ -206,7 +206,7 @@ def _show_metrics(results_df: pd.DataFrame):
     total_grid_load     = results_df["grid_load"].sum()
     total_grid_to_batt  = results_df["grid_to_battery"].sum()
     total_battery_load  = results_df["battery_load"].sum()
-    total_pv_gen = results_df["pv_kw"].sum() * 0.25   # kW × 0.25 hr = kWh
+    total_pv_gen = results_df["pv_kw"].sum() * 0.5   # kW × 0.5 hr = kWh
 
     # FIX: all styles are fully inlined — no class lookups across st.markdown calls.
     # Streamlit scopes injected HTML and can't reliably resolve classes defined in a
@@ -576,27 +576,48 @@ def _tab_weekly(cfg: SystemConfig):
 
 
 def _tab_monthly(cfg: SystemConfig):
-    today      = datetime.date.today()
-    month_name = today.strftime("%B %Y")
-    st.caption(
-        f"Historical data from the 1st of {month_name} through yesterday, "
-        f"plus forecast for the remaining days of this month."
-    )
+    col1, col2 = st.columns(2)
+    with col1:
+        month = st.selectbox(
+            "Month",
+            list(range(1, 13)),
+            index=datetime.date.today().month - 1,
+            format_func=lambda m: datetime.date(2000, m, 1).strftime("%B"),
+        )
+    with col2:
+        year = st.number_input("Year", min_value=2020, max_value=2030,
+                               value=datetime.date.today().year, step=1)
+
+    st.caption(f"Historical + forecast data for {datetime.date(year, month, 1).strftime('%B %Y')}.")
+
     if not st.button("▶ Run Monthly Simulation", type="primary", key="run_monthly"):
         return
 
-    with st.spinner(f"Fetching data for {month_name}…"):
-        raw_df = get_weather_monthly(cfg.latitude, cfg.longitude)
+    with st.spinner(f"Fetching data for {datetime.date(year, month, 1).strftime('%B %Y')}…"):
+        raw_df = get_weather_monthly(cfg.latitude, cfg.longitude, month=month, year=year)
 
     with st.spinner("Running simulation…"):
-        results_df = _run_simulation(raw_df, cfg)
-        basic_df   = _run_basic_simulation(raw_df, cfg)
+        monthly_cfg = SystemConfig(
+            battery_capacity=cfg.battery_capacity,
+            soc_floor=cfg.soc_floor,
+            pv_capacity=cfg.pv_capacity,
+            soc_max=cfg.soc_max,
+            system_efficiency=cfg.system_efficiency,
+            import_rate=cfg.import_rate,
+            export_rate=cfg.export_rate,
+            peak_rate=17.47 if month <= 6 else 17.27,
+            offpeak_rate=cfg.offpeak_rate,
+            algorithm_mode=cfg.algorithm_mode,
+            latitude=cfg.latitude,
+            longitude=cfg.longitude,
+        )
+        results_df = _run_simulation(raw_df, monthly_cfg)
+        basic_df   = _run_basic_simulation(raw_df, monthly_cfg)
 
     st.divider()
     st.subheader("Summary")
-
     _show_metrics(results_df)
-    _show_simulation_insights(results_df, cfg)
+    _show_simulation_insights(results_df, monthly_cfg)
     _show_charts_daily_agg(results_df, basic_df=basic_df)
     _show_daily_summary(results_df)
 

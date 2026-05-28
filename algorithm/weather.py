@@ -102,40 +102,57 @@ def get_weather_weekly(latitude, longitude):
     return combined
 
 
-def get_weather_monthly(latitude, longitude):
+def get_weather_monthly(latitude, longitude, month=None, year=None):
     """
-    Returns data for the current month:
-    - Historical data from the 1st to yesterday
-    - Forecast for today onwards
-    Combines both into a single DataFrame.
+    Returns data for any calendar month:
+    - Past months: fully historical
+    - Current month: historical up to yesterday + forecast for remainder
+    - Future months: not supported
     """
     today = datetime.date.today()
-    month_start = today.replace(day=1)
-    yesterday = today - datetime.timedelta(days=1)
+    if month is None:
+        month = today.month
+    if year is None:
+        year = today.year
+
+    month_start = datetime.date(year, month, 1)
+    # Last day of the month
+    if month == 12:
+        month_end = datetime.date(year + 1, 1, 1) - datetime.timedelta(days=1)
+    else:
+        month_end = datetime.date(year, month + 1, 1) - datetime.timedelta(days=1)
 
     frames = []
 
-    # Historical: 1st of month → yesterday (only if month has started > 1 day)
-    if yesterday >= month_start:
+    is_current_month = (year == today.year and month == today.month)
+
+    if is_current_month:
+        yesterday = today - datetime.timedelta(days=1)
+
+        # Historical: 1st → yesterday
+        if yesterday >= month_start:
+            hist_df = get_weather_historical(
+                latitude, longitude,
+                start_date=month_start.isoformat(),
+                end_date=yesterday.isoformat(),
+            )
+            frames.append(hist_df)
+
+        # Forecast: today → end of month
+        days_remaining = max(1, min((month_end - today).days + 1, 16))
+        forecast_df = get_weather_forecast(latitude, longitude, forecast_days=days_remaining)
+        frames.append(forecast_df)
+
+    else:
+        # Past month: fully historical
         hist_df = get_weather_historical(
             latitude, longitude,
             start_date=month_start.isoformat(),
-            end_date=yesterday.isoformat()
+            end_date=month_end.isoformat(),
         )
         frames.append(hist_df)
 
-    # Forecast: today → end of month
-    if today.month == 12:
-        next_month = today.replace(year=today.year + 1, month=1, day=1)
-    else:
-        next_month = today.replace(month=today.month + 1, day=1)
-    days_remaining = max(1, min((next_month - today).days, 16))
-
-    forecast_df = get_weather_forecast(latitude, longitude, forecast_days=days_remaining)
-    frames.append(forecast_df)
-
     combined = pd.concat(frames, ignore_index=True)
-    # Drop duplicates on time in case of overlap
     combined = combined.drop_duplicates(subset="time").reset_index(drop=True)
     return combined
 

@@ -135,7 +135,7 @@ def should_grid_charge(outlook, forecast_tier, soc, pv_state, cfg):
         return target_soc
 
     if outlook == "CLOUDY_WEEK":
-        target_soc = 0.90 if pv_state == "NIGHT" else 0.85
+        target_soc = 0.85
         if soc >= target_soc - 0.10:
             return None
         return target_soc
